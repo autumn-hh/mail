@@ -1551,6 +1551,48 @@ body {
     }
 }
 
+/* 移动端小屏适配优化 */
+@media (max-width: 480px) {
+    .sidebar {
+        width: 100%;
+    }
+    .custom-modal-content {
+        width: 95%;
+        max-width: 100%;
+    }
+    .info-cards {
+        grid-template-columns: 1fr;
+    }
+    .top-bar, .view-header {
+        gap: 0.75rem;
+    }
+    .top-actions, .view-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 0.5rem;
+    }
+    .top-actions .btn, .view-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+    .email-list-header {
+        padding: 0.75rem;
+    }
+    .email-search-box {
+        width: 100%;
+    }
+    .email-search-box input {
+        width: 100%;
+    }
+    .nav-item {
+        min-width: 60px;
+        padding: 0.75rem 0.5rem;
+    }
+    .mailbox-status {
+        font-size: 0.8rem;
+    }
+}
+
 /* 访问令牌模态框样式 */
 .token-display-section {
     margin-bottom: 1.5rem;

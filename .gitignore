@@ -1,1 +1,7 @@
 .venv/
+.env
+.env.*
+data/*.db
+data/*.json
+__pycache__/
+*.pyc

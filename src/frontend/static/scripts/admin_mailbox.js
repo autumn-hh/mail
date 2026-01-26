@@ -343,41 +343,48 @@ class AdminMailboxManager {
                 </div>
                 <div class="mailbox-info">
                     <div class="info-item">
-                        <label>邮箱地址：</label>
-                        <div class="info-value">${response.data.address}</div>
+                        <label>邮箱地址</label>
+                        <div class="info-value address-value">${response.data.address}</div>
                     </div>
+                    
                     <div class="info-item">
-                        <label>访问令牌：</label>
-                        <div class="token-display-inline">
+                        <label>访问令牌</label>
+                        <div class="token-box">
                             <code>${response.data.access_token}</code>
-                            <button class="btn-icon" onclick="copyToClipboard('${response.data.access_token}')" title="复制">
-                                <i class="fas fa-copy"></i>
+                            <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${response.data.access_token}')">
+                                <i class="fas fa-copy"></i> 复制
                             </button>
                         </div>
-                        <small class="warning-text">
+                        <div class="warning-alert">
                             <i class="fas fa-exclamation-triangle"></i>
-                            此令牌仅显示一次，请立即复制保存！
-                        </small>
+                            <span>此令牌仅显示一次，请立即复制保存！</span>
+                        </div>
                     </div>
+                    
                     <div class="info-item">
-                        <label>过期时间：</label>
+                        <label>过期时间</label>
                         <div class="info-value">${this.formatDate(response.data.expires_at)}</div>
                     </div>
+                    
                     <div class="info-item">
-                        <label>邮箱访问地址：</label>
+                        <label>邮箱访问地址</label>
                         <div class="info-value">
-                            <a href="/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}" target="_blank" style="color: var(--primary-color); text-decoration: none;">
-                                ${window.location.origin}/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}
+                            <a href="/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}" target="_blank" class="access-link">
+                                ${window.location.origin}/mailbox?address=${encodeURIComponent(response.data.address)}...
                             </a>
+                            <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${window.location.origin}/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}')">
+                                <i class="fas fa-copy"></i> 复制链接
+                            </button>
                         </div>
                     </div>
                 </div>
+                
                 <div class="result-actions">
                     <button class="btn btn-success" onclick="window.open('/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}', '_blank')">
                         <i class="fas fa-external-link-alt"></i>
                         打开邮箱
                     </button>
-                    <button class="btn btn-primary" onclick="adminManager.switchView('register')">
+                    <button class="btn btn-primary" onclick="adminManager.switchView('register'); document.getElementById('admin-register-form').style.display='block'; document.getElementById('register-result').style.display='none';">
                         <i class="fas fa-plus"></i>
                         继续创建
                     </button>
@@ -483,24 +490,24 @@ class AdminMailboxManager {
                     <td>
                         <input type="checkbox" class="mailbox-checkbox" value="${mailbox.id}" onchange="updateBatchDeleteButton()">
                     </td>
-                    <td>
+                    <td data-label="邮箱地址">
                         <div class="mailbox-address">
                             ${mailbox.address}
                             ${mailbox.whitelist_enabled ? '<i class="fas fa-shield-alt" title="已启用白名单"></i>' : ''}
                         </div>
                     </td>
-                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td>
+                    <td data-label="状态"><span class="status-badge ${statusClass}">${statusText}</span></td>
+                    <td data-label="创建来源">
                         <span class="source-badge ${sourceConfig.class}">
                             <i class="fas ${sourceConfig.icon}"></i>
                             ${sourceConfig.text}
                         </span>
                     </td>
-                    <td>${this.formatDate(mailbox.created_at)}</td>
-                    <td>${this.formatDate(mailbox.expires_at)}</td>
-                    <td>${mailbox.email_count}</td>
-                    <td>${mailbox.unread_count}</td>
-                    <td>
+                    <td data-label="创建时间">${this.formatDate(mailbox.created_at)}</td>
+                    <td data-label="过期时间">${this.formatDate(mailbox.expires_at)}</td>
+                    <td data-label="邮件数">${mailbox.email_count}</td>
+                    <td data-label="未读">${mailbox.unread_count}</td>
+                    <td class="actions-cell">
                         <div class="action-buttons">
                             <button class="btn-icon" onclick="adminManager.viewMailbox('${mailbox.id}')" title="查看详情">
                                 <i class="fas fa-eye"></i>
@@ -691,19 +698,19 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
         modal.innerHTML = `
             <div class="modal-content modal-large">
                 <div class="modal-header">
-                    <h3>邮箱详情</h3>
+                    <h3><i class="fas fa-inbox"></i> 邮箱详情</h3>
                     <button class="modal-close" onclick="this.closest('.modal').remove()">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
                 <div class="modal-body">
                     <div class="detail-grid">
-                        <div class="detail-item">
-                            <label>邮箱地址</label>
-                            <div>${mailbox.address}</div>
+                        <div class="detail-item full-width">
+                            <label><i class="fas fa-at"></i> 邮箱地址</label>
+                            <div class="address-value">${mailbox.address}</div>
                         </div>
                         <div class="detail-item">
-                            <label>状态</label>
+                            <label><i class="fas fa-info-circle"></i> 状态</label>
                             <div>
                                 <span class="status-badge ${mailbox.is_expired ? 'expired' : (mailbox.is_active ? 'active' : 'disabled')}">
                                     ${mailbox.is_expired ? '已过期' : (mailbox.is_active ? '活跃' : '已禁用')}
@@ -711,23 +718,23 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label>创建时间</label>
+                            <label><i class="fas fa-calendar-plus"></i> 创建时间</label>
                             <div>${this.formatDate(mailbox.created_at)}</div>
                         </div>
                         <div class="detail-item">
-                            <label>过期时间</label>
+                            <label><i class="fas fa-hourglass-end"></i> 过期时间</label>
                             <div>${this.formatDate(mailbox.expires_at)}</div>
                         </div>
                         <div class="detail-item">
-                            <label>保留天数</label>
+                            <label><i class="fas fa-stopwatch"></i> 保留天数</label>
                             <div>${mailbox.retention_days} 天</div>
                         </div>
                         <div class="detail-item">
-                            <label>邮件统计</label>
+                            <label><i class="fas fa-envelope"></i> 邮件统计</label>
                             <div>总计 ${mailbox.email_count} 封，未读 ${mailbox.unread_count} 封</div>
                         </div>
                         <div class="detail-item">
-                            <label>存储容量</label>
+                            <label><i class="fas fa-hdd"></i> 存储容量</label>
                             <div>
                                 <div class="storage-info">
                                     <div class="storage-bar">
@@ -741,19 +748,19 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label>白名单状态</label>
+                            <label><i class="fas fa-shield-alt"></i> 白名单状态</label>
                             <div>${mailbox.whitelist_enabled ? '已启用' : '未启用'}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label>发件人白名单</label>
+                            <label><i class="fas fa-list-alt"></i> 发件人白名单</label>
                             <div>${mailbox.sender_whitelist.length > 0 ? mailbox.sender_whitelist.join(', ') : '无'}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label>允许的域名</label>
+                            <label><i class="fas fa-globe"></i> 允许的域名</label>
                             <div>${mailbox.allowed_domains && mailbox.allowed_domains.length > 0 ? mailbox.allowed_domains.join(', ') : '无限制'}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label>访问令牌 (Access Token)</label>
+                            <label><i class="fas fa-key"></i> 访问令牌 (Access Token)</label>
                             <div class="token-display-inline">
                                 <code>${mailbox.access_token}</code>
                                 <button class="btn-icon" onclick="copyToClipboard('${mailbox.access_token}')" title="复制">
@@ -762,7 +769,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item full-width">
-                            <label>邮箱密钥 (Mailbox Key)</label>
+                            <label><i class="fas fa-lock"></i> 邮箱密钥 (Mailbox Key)</label>
                             <div class="token-display-inline">
                                 <code>${mailbox.mailbox_key}</code>
                                 <button class="btn-icon" onclick="copyToClipboard('${mailbox.mailbox_key}')" title="复制">
@@ -771,35 +778,34 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label>创建IP</label>
+                            <label><i class="fas fa-network-wired"></i> 创建IP</label>
                             <div>${mailbox.created_by_ip || '-'}</div>
                         </div>
                         <div class="detail-item">
-                            <label>最后访问</label>
+                            <label><i class="fas fa-history"></i> 最后访问</label>
                             <div>${this.formatDate(mailbox.last_accessed)}</div>
                         </div>
                         <div class="detail-item">
-                            <label>最后更新管理员</label>
+                            <label><i class="fas fa-user-shield"></i> 最后更新管理员</label>
                             <div>${mailbox.updated_by_admin || '-'}</div>
                         </div>
                         <div class="detail-item">
-                            <label>最后更新时间</label>
+                            <label><i class="fas fa-pen-square"></i> 最后更新时间</label>
                             <div>${this.formatDate(mailbox.updated_at)}</div>
                         </div>
-                        <div class="detail-item full-width" style="margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--primary-color);">
-                            <label style="color: var(--primary-color); font-weight: 600;">
+                        <div class="detail-item full-width quick-access-box">
+                            <div class="quick-access-label">
                                 <i class="fas fa-link"></i>
                                 🎯 快速访问链接
-                            </label>
-                            <div style="margin-top: 0.5rem;">
-                                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                                    <code style="flex: 1; min-width: 300px; padding: 0.5rem; background: var(--bg-primary); border-radius: 4px; font-size: 12px; word-break: break-all;">${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}</code>
-                                    <button class="btn-icon" onclick="copyToClipboard('${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}')" title="复制链接">
-                                        <i class="fas fa-copy"></i>
+                            </div>
+                            <div class="quick-access-content">
+                                <div class="quick-access-url">${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}</div>
+                                <div class="quick-access-actions">
+                                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}')" title="复制链接">
+                                        <i class="fas fa-copy"></i> 复制
                                     </button>
-                                    <a href="/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}" target="_blank" class="btn btn-sm btn-primary" style="white-space: nowrap;">
-                                        <i class="fas fa-external-link-alt"></i>
-                                        打开邮箱
+                                    <a href="/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}" target="_blank" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-external-link-alt"></i> 打开
                                     </a>
                                 </div>
                             </div>
@@ -1012,15 +1018,17 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
 
         tbody.innerHTML = logs.map(log => `
             <tr>
-                <td>${this.formatDate(log.timestamp)}</td>
-                <td><span class="action-badge action-${log.action.toLowerCase()}">${log.action}</span></td>
-                <td><code>${log.mailbox_id || '-'}</code></td>
-                <td>${log.admin_user || '-'}</td>
-                <td>${log.ip_address || '-'}</td>
-                <td>
-                    <button class="btn-icon" onclick="adminManager.showAuditDetail(${JSON.stringify(log).replace(/"/g, '&quot;')})" title="查看详情">
-                        <i class="fas fa-info-circle"></i>
-                    </button>
+                <td data-label="时间">${this.formatDate(log.timestamp)}</td>
+                <td data-label="操作"><span class="action-badge action-${log.action.toLowerCase()}">${log.action}</span></td>
+                <td data-label="邮箱ID"><code>${log.mailbox_id || '-'}</code></td>
+                <td data-label="管理员">${log.admin_user || '-'}</td>
+                <td data-label="IP地址">${log.ip_address || '-'}</td>
+                <td class="actions-cell">
+                    <div class="action-buttons">
+                        <button class="btn-icon" onclick="adminManager.showAuditDetail(${JSON.stringify(log).replace(/"/g, '&quot;')})" title="查看详情">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `).join('');
@@ -1034,10 +1042,37 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
 AdminMailboxManager.prototype.showAuditDetail = function(log) {
     const modal = document.createElement('div');
     modal.className = 'modal show';
+    
+    // 格式化 JSON 显示
+    const formatJSON = (obj) => {
+        if (!obj) return '<span class="text-muted">无数据</span>';
+        try {
+            const json = JSON.stringify(obj, null, 2);
+            // 简单的语法高亮
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                let cls = 'json-number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'json-key';
+                    } else {
+                        cls = 'json-string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'json-boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'json-null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        } catch (e) {
+            return String(obj);
+        }
+    };
+
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
-                <h3>审计日志详情</h3>
+                <h3><i class="fas fa-info-circle"></i> 审计日志详情</h3>
                 <button class="modal-close" onclick="this.closest('.modal').remove()">
                     <i class="fas fa-times"></i>
                 </button>
@@ -1045,28 +1080,28 @@ AdminMailboxManager.prototype.showAuditDetail = function(log) {
             <div class="modal-body">
                 <div class="detail-grid">
                     <div class="detail-item">
-                        <label>时间</label>
+                        <label><i class="fas fa-clock"></i> 时间</label>
                         <div>${this.formatDate(log.timestamp)}</div>
                     </div>
                     <div class="detail-item">
-                        <label>操作</label>
+                        <label><i class="fas fa-tag"></i> 操作</label>
                         <div><span class="action-badge action-${log.action.toLowerCase()}">${log.action}</span></div>
                     </div>
                     <div class="detail-item">
-                        <label>邮箱ID</label>
+                        <label><i class="fas fa-inbox"></i> 邮箱ID</label>
                         <div><code>${log.mailbox_id || '-'}</code></div>
                     </div>
                     <div class="detail-item">
-                        <label>管理员</label>
+                        <label><i class="fas fa-user-shield"></i> 管理员</label>
                         <div>${log.admin_user || '-'}</div>
                     </div>
                     <div class="detail-item">
-                        <label>IP地址</label>
+                        <label><i class="fas fa-network-wired"></i> IP地址</label>
                         <div>${log.ip_address || '-'}</div>
                     </div>
                     <div class="detail-item full-width">
-                        <label>变更内容</label>
-                        <pre>${JSON.stringify(log.changes, null, 2)}</pre>
+                        <label><i class="fas fa-file-code"></i> 变更内容</label>
+                        <div class="audit-log-content json-viewer">${formatJSON(log.changes)}</div>
                     </div>
                 </div>
             </div>
@@ -1482,34 +1517,36 @@ function displaySubAdmins(subAdmins) {
 
     tbody.innerHTML = subAdmins.map(admin => `
         <tr>
-            <td><code>${admin.token}</code></td>
-            <td>
+            <td data-label="Token"><code>${admin.token}</code></td>
+            <td data-label="可创建域名">
                 <div class="domains-tags">
                     ${admin.domains.map(d => `<span class="domain-tag">${d}</span>`).join('')}
                 </div>
             </td>
-            <td>
+            <td data-label="发件人白名单">
                 <div class="domains-tags">
                     ${admin.sender_whitelist && admin.sender_whitelist.length > 0
                         ? admin.sender_whitelist.map(d => `<span class="domain-tag">${d}</span>`).join('')
                         : '<span class="text-muted">不限制</span>'}
                 </div>
             </td>
-            <td>${admin.max_retention_days || 30} 天</td>
-            <td>
+            <td data-label="最长保留天数">${admin.max_retention_days || 30} 天</td>
+            <td data-label="状态">
                 <span class="status-badge ${admin.is_active ? 'status-active' : 'status-inactive'}">
                     ${admin.is_active ? '启用' : '禁用'}
                 </span>
             </td>
-            <td>${adminManager.formatDate(admin.created_at)}</td>
-            <td>${admin.notes || '-'}</td>
-            <td>
-                <button class="btn btn-sm btn-primary" onclick="editSubAdmin('${admin.id}')">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button class="btn btn-sm btn-danger" onclick="deleteSubAdmin('${admin.id}', '${admin.token}')">
-                    <i class="fas fa-trash"></i>
-                </button>
+            <td data-label="创建时间">${adminManager.formatDate(admin.created_at)}</td>
+            <td data-label="备注">${admin.notes || '-'}</td>
+            <td class="actions-cell">
+                <div class="action-buttons">
+                    <button class="btn-icon" onclick="editSubAdmin('${admin.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn-icon btn-danger" onclick="deleteSubAdmin('${admin.id}', '${admin.token}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </td>
         </tr>
     `).join('');

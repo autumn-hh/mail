@@ -1559,3 +1559,53 @@ body {
         display: none;
     }
 }
+
+@media (max-width: 480px) {
+    .container {
+        padding: 1rem 0.5rem;
+    }
+
+    .nav-container { 
+        padding: 0.75rem 0.5rem; 
+        flex-wrap: wrap; 
+        gap: 0.5rem; 
+    }
+
+    .nav-actions {
+        gap: 0.5rem;
+    }
+    
+    .hero-section { 
+        padding: 2rem 1rem 1rem; 
+    }
+    
+    .hero-title { 
+        font-size: 1.75rem; 
+    }
+    
+    .hero-icon { 
+        font-size: 3rem; 
+    }
+
+    .email-panel {
+        padding: 1rem;
+    }
+
+    .email-display {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .email-input-container {
+        margin-bottom: 0.5rem;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .feature-tag {
+        width: 100%;
+        justify-content: center;
+    }
+}

@@ -823,3 +823,27 @@ body {
         font-size: 2.5rem;
     }
 }
+
+@media (max-width: 480px) {
+    body {
+        padding: 1rem;
+    }
+    
+    .register-card, .admin-login-card { 
+        padding: 1.25rem; 
+    }
+    
+    .register-footer a, .register-btn, .admin-login-footer .back-link, .btn-primary { 
+        width: 100%; 
+        justify-content: center; 
+        box-sizing: border-box;
+    }
+    
+    .circle-1, .circle-2, .circle-3 {
+        display: none; /* Hide decorative circles on small screens to prevent overflow */
+    }
+
+    .form-group label {
+        font-size: 0.8rem;
+    }
+}

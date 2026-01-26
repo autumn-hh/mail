@@ -250,6 +250,7 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 0.75rem;
+        flex-wrap: wrap; /* Fix overflow issues */
     }
     
     .test-ip-container {
@@ -259,5 +260,26 @@
     
     .quick-add-buttons {
         flex-direction: column;
+    }
+}
+
+@media (max-width: 480px) {
+    .admin-panel {
+        padding: 1.25rem;
+    }
+    
+    .current-ip { 
+        white-space: normal; 
+        width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .panel-actions { 
+        gap: 0.5rem; 
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
     }
 }
