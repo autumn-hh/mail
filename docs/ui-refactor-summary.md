@@ -87,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 
 ### 生产部署验证
 
-- 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；部署提交：`8271de6365fe0e93254aed260e54048ba79ac121`；
+- 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；实际部署提交以服务器内 `.deploy-version` 与 `.deploy-commit` 为准；
 - 生产 `.env` 仅存在于服务器且权限为 `600`；Compose 服务 `tempmail` 为 `healthy`，Web 仅绑定 `127.0.0.1:8081`，SMTP 保持公网 `25`；
 - OpenResty 上游使用 `127.0.0.1:8081`，HTTPS 响应包含 HSTS，证书私钥权限已收紧为 `600`，公网无法直连 `8081`；
 - `/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
