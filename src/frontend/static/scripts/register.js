@@ -315,9 +315,10 @@ class RegisterManager {
                 // 等待一下让用户看到成功状态
                 await new Promise(resolve => setTimeout(resolve, 1500));
 
-                if (result.mailbox_created && result.access_token) {
-                    // 有邮箱创建成功，显示访问URL
-                    const accessUrl = `${window.location.origin}/mailbox?address=${encodeURIComponent(result.mailbox_address)}&token=${encodeURIComponent(result.access_token)}`;
+                if (result.mailbox_created && result.mailbox_key) {
+                    // 分段编码邮箱与密钥，避免特殊字符改变凭据路由含义。
+                    const accessPath = `/web/${encodeURIComponent(result.mailbox_address)}----${encodeURIComponent(result.mailbox_key)}`;
+                    const accessUrl = `${window.location.origin}${accessPath}`;
 
                     this.showToast('临时邮箱创建成功！', 'success', 3000);
 
@@ -332,7 +333,7 @@ class RegisterManager {
                             ${domainInfo}
                             保留时间：${result.retention_days}天<br><br>
                             <strong>访问链接：</strong><br>
-                            <a href="${accessUrl}" target="_blank" style="color: #007bff; word-break: break-all;">${accessUrl}</a><br><br>
+                            <a href="${accessUrl}" target="_blank" rel="noopener noreferrer" style="color: #007bff; word-break: break-all;">${accessUrl}</a><br><br>
                             <small>点击链接即可开始使用您的临时邮箱</small>
                         </div>
                     `, 'info', 10000);
@@ -358,7 +359,7 @@ class RegisterManager {
                         `;
                         accessButton.onmouseover = () => accessButton.style.transform = 'translateY(-2px)';
                         accessButton.onmouseout = () => accessButton.style.transform = 'translateY(0)';
-                        accessButton.onclick = () => window.open(accessUrl, '_blank');
+                        accessButton.onclick = () => window.open(accessUrl, '_blank', 'noopener,noreferrer');
 
                         document.body.appendChild(accessButton);
 

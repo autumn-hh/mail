@@ -62,8 +62,8 @@ class MailboxService:
         
         return True, ""
     
-    def _log_audit(self, action: str, mailbox_id: str, admin_user: str, 
-                   changes: Dict = None, ip_address: str = None):
+    def _log_audit(self, action: str, mailbox_id: Optional[str], admin_user: str,
+                   changes: Optional[Dict] = None, ip_address: Optional[str] = None):
         """记录审计日志"""
         try:
             audit_entry = {
@@ -94,7 +94,8 @@ class MailboxService:
             print(f"审计日志记录失败: {e}")
     
     def list_mailboxes(self, page: int = 1, page_size: int = 20,
-                      search: str = None, status: str = None, source: str = None) -> Dict:
+                      search: Optional[str] = None, status: Optional[str] = None,
+                      source: Optional[str] = None) -> Dict:
         """
         获取邮箱列表（分页）
         status: 'active', 'expired', 'disabled', 'all'
@@ -234,9 +235,9 @@ class MailboxService:
                 'allowed_domains': json.loads(safe_get('allowed_domains') or '[]') if safe_get('allowed_domains') else []
             }
     
-    def create_mailbox(self, address: str, retention_days: int = None,
-                      sender_whitelist: List[str] = None, admin_user: str = None,
-                      ip_address: str = None) -> Tuple[bool, str, Optional[Dict]]:
+    def create_mailbox(self, address: str, retention_days: Optional[int] = None,
+                      sender_whitelist: Optional[List[str]] = None, admin_user: Optional[str] = None,
+                      ip_address: Optional[str] = None) -> Tuple[bool, str, Optional[Dict]]:
         """
         创建邮箱
         返回: (成功标志, 消息, 邮箱数据)
@@ -253,9 +254,8 @@ class MailboxService:
             return False, "邮箱地址已存在", None
         
         # 验证保留天数
-        if retention_days is None:
-            retention_days = self.default_retention_days
-        valid, msg = self._validate_retention_days(retention_days)
+        effective_retention_days = retention_days if retention_days is not None else self.default_retention_days
+        valid, msg = self._validate_retention_days(effective_retention_days)
         if not valid:
             return False, msg, None
         
@@ -269,9 +269,9 @@ class MailboxService:
             # 创建邮箱
             mailbox = self.db.create_mailbox(
                 address=address,
-                retention_days=retention_days,
+                retention_days=effective_retention_days,
                 sender_whitelist=sender_whitelist or [],
-                created_by_ip=ip_address,
+                created_by_ip=ip_address or 'unknown',
                 created_source="admin"
             )
 
@@ -280,7 +280,7 @@ class MailboxService:
                 action='CREATE',
                 mailbox_id=mailbox['id'],
                 admin_user=admin_user or 'system',
-                changes={'address': address, 'retention_days': retention_days},
+                changes={'address': address, 'retention_days': effective_retention_days},
                 ip_address=ip_address
             )
 
@@ -290,7 +290,7 @@ class MailboxService:
             return False, f"创建失败: {str(e)}", None
 
     def update_mailbox(self, mailbox_id: str, updates: Dict,
-                      admin_user: str = None, ip_address: str = None) -> Tuple[bool, str]:
+                      admin_user: Optional[str] = None, ip_address: Optional[str] = None) -> Tuple[bool, str]:
         """
         更新邮箱信息
         updates可包含: retention_days, sender_whitelist, whitelist_enabled, is_active
@@ -395,7 +395,7 @@ class MailboxService:
             return False, f"更新失败: {str(e)}"
 
     def delete_mailbox(self, mailbox_id: str, soft_delete: bool = True,
-                      admin_user: str = None, ip_address: str = None) -> Tuple[bool, str]:
+                      admin_user: Optional[str] = None, ip_address: Optional[str] = None) -> Tuple[bool, str]:
         """
         删除邮箱
         soft_delete=True: 软删除（设置is_active=False）
@@ -444,7 +444,7 @@ class MailboxService:
         except Exception as e:
             return False, f"删除失败: {str(e)}"
 
-    def get_audit_logs(self, mailbox_id: str = None, limit: int = 50) -> List[Dict]:
+    def get_audit_logs(self, mailbox_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
         """获取审计日志"""
         try:
             with self.db.get_connection() as conn:

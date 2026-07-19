@@ -508,6 +508,21 @@
                     <div class="register-card">
                         <form id="admin-register-form">
                             <div class="form-group">
+                                <label>创建模式 *</label>
+                                <div class="register-mode-toggle">
+                                    <label class="mode-option">
+                                        <input type="radio" name="reg-create-mode" value="single" checked>
+                                        <span>单个创建</span>
+                                    </label>
+                                    <label class="mode-option">
+                                        <input type="radio" name="reg-create-mode" value="batch">
+                                        <span>批量创建</span>
+                                    </label>
+                                </div>
+                                <small>批量创建会使用“用户名前缀 + 序号（补零）”生成用户名</small>
+                            </div>
+
+                            <div class="form-group">
                                 <label>邮箱地址 *</label>
                                 <div class="email-input-group">
                                     <input type="text" id="reg-email-prefix" required placeholder="username" class="email-prefix-input">
@@ -519,7 +534,13 @@
                                         <i class="fas fa-random"></i>
                                     </button>
                                 </div>
-                                <small>点击随机按钮生成随机邮箱名，从下拉框选择域名</small>
+                                <small>用户名仅允许英文/数字，长度 3–20；随机生成会生成“英文名+4位数字”</small>
+                            </div>
+
+                            <div class="form-group" id="reg-batch-count-group" style="display: none;">
+                                <label for="reg-batch-count">创建数量 *</label>
+                                <input type="number" id="reg-batch-count" min="2" max="100" value="2" required>
+                                <small>一次可创建 2–100 个邮箱</small>
                             </div>
 
                             <div class="form-group">
@@ -702,4 +723,3 @@
     <script src="{{ url_for('static', filename='scripts/admin_mailbox.js') }}"></script>
 </body>
 </html>
-

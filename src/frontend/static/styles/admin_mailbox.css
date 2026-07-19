@@ -830,6 +830,8 @@ body {
         grid-template-columns: 1fr 1fr !important; /* 移动端一行两个信息卡 */
     }
 }
+
+.filter-bar {
     margin-bottom: 24px;
     flex-wrap: wrap;
     align-items: center;
@@ -945,6 +947,10 @@ body {
     border-collapse: collapse;
 }
 
+.mailbox-table {
+    table-layout: fixed;
+}
+
 .mailbox-table thead,
 .audit-table thead {
     background: var(--bg-tertiary);
@@ -1031,16 +1037,43 @@ body {
 .action-buttons {
     display: flex;
     gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
 }
 
 .mailbox-address {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+}
+
+.mailbox-table td[data-label="邮箱地址"] {
+    min-width: 0;
+}
+
+.mailbox-address-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .mailbox-address i {
     color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.mailbox-table th:last-child,
+.mailbox-table td.actions-cell {
+    width: 132px;
+    min-width: 132px;
+    white-space: nowrap;
+}
+
+.mailbox-table td.actions-cell {
+    text-align: right;
 }
 
 /* 分页 */
@@ -1336,6 +1369,110 @@ body {
 .register-content {
     max-width: 600px;
     margin: 0 auto;
+}
+
+.register-mode-toggle {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s;
+}
+
+.mode-option:hover {
+    border-color: var(--primary-color);
+}
+
+.mode-option input[type="radio"] {
+    accent-color: var(--primary-color);
+}
+
+.batch-result-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.batch-summary-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.batch-summary-item .label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.batch-summary-item .value {
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.batch-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.batch-result-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid transparent;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.batch-result-item.success {
+    border-left-color: var(--success-color);
+}
+
+.batch-result-item.error {
+    border-left-color: var(--danger-color);
+}
+
+.batch-result-item .address {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    word-break: break-all;
+    flex: 1;
+}
+
+.batch-result-item .detail {
+    color: var(--text-secondary);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.batch-result-item a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.batch-result-item a:hover {
+    text-decoration: underline;
 }
 
 .register-card {
@@ -2292,6 +2429,9 @@ body {
 .json-number { color: var(--warning-color); }
 .json-boolean { color: var(--danger-color); }
 .json-null { color: var(--text-secondary); }
+
+.email-input-group {
+    display: flex;
     gap: 8px;
     align-items: center;
 }
@@ -2651,9 +2791,17 @@ body {
         font-weight: 600;
         font-size: 16px;
         color: var(--primary-color);
-        word-break: break-all;
+        align-items: flex-start;
         text-align: left; /* 地址左对齐 */
         padding-right: 30px; /* 给复选框留空间 */
+    }
+
+    .mailbox-address-text {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+        word-break: break-all;
+        overflow-wrap: anywhere;
     }
     
     .mailbox-table td[data-label="邮箱地址"] {
@@ -2670,7 +2818,6 @@ body {
 
     /* 操作按钮栏优化 */
     .actions-cell {
-        margin-top: 8px;
         background: var(--bg-tertiary);
         margin: 8px -16px -16px -16px; /* 抵消 padding */
         padding: 12px 16px !important;
@@ -2788,4 +2935,3 @@ body {
         width: 100%;
     }
 }
-

@@ -1,14 +1,43 @@
 // 邮箱管理系统 - 前端逻辑
 
+// 统一转义所有写入 HTML 模板的外部数据，避免数据库/API 字段形成存储型 XSS。
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// 仅允许安全字符进入 CSS 类名，避免审计操作名等外部字段突破 class 属性。
+function safeCssToken(value, fallback = 'unknown') {
+    const token = String(value ?? '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    return token || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === '') return fallback;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
 class AdminMailboxManager {
     constructor() {
-        this.authToken = localStorage.getItem('admin_token');
+        // 管理员凭据仅保留在当前标签会话，避免共享设备长期残留。
+        this.authToken = sessionStorage.getItem('admin_token');
+        localStorage.removeItem('admin_token');
         this.currentView = 'login';
         this.currentPage = 1;
         this.pageSize = 20;
         this.currentStatus = 'all';
         this.currentSource = 'all';
         this.searchQuery = '';
+
+        // 注册视图状态
+        this.registerMode = 'single';
+        this.isRegistering = false;
+
         this.init();
     }
     
@@ -74,7 +103,9 @@ class AdminMailboxManager {
         // 筛选按钮
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.remove('active');
+                });
                 e.currentTarget.classList.add('active');
                 this.currentStatus = e.currentTarget.dataset.status;
                 this.currentPage = 1;
@@ -112,25 +143,57 @@ class AdminMailboxManager {
                 this.generateRandomEmailPrefix();
             });
         }
+
+        // 创建模式切换
+        const modeInputs = document.querySelectorAll('input[name="reg-create-mode"]');
+        if (modeInputs && modeInputs.length > 0) {
+            modeInputs.forEach(input => {
+                input.addEventListener('change', (e) => {
+                    this.applyRegisterModeToUi(e.target.value);
+                });
+            });
+
+            const selectedInput = Array.from(modeInputs).find(i => i.checked);
+            const selectedMode = (selectedInput && selectedInput.value) ? selectedInput.value : 'single';
+            this.applyRegisterModeToUi(selectedMode);
+        }
     }
 
     async generateRandomEmailPrefix() {
-        // 生成随机字符串（8-12位）
-        const length = Math.floor(Math.random() * 5) + 8; // 8-12
-        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        let result = '';
-        for (let i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
+        const username = this.generateRandomUsername();
 
         // 设置到输入框
         const prefixInput = document.getElementById('reg-email-prefix');
         if (prefixInput) {
-            prefixInput.value = result;
+            prefixInput.value = username;
         }
 
         // 加载域名列表并随机选择一个
-        await this.loadAvailableDomains(true);
+        const domainSelect = document.getElementById('reg-email-domain');
+        const hasDomainOptions = domainSelect && domainSelect.options && domainSelect.options.length > 1;
+        if (hasDomainOptions) {
+            this.selectRandomDomain();
+        } else {
+            await this.loadAvailableDomains(true);
+        }
+    }
+
+    selectRandomDomain() {
+        const domainSelect = document.getElementById('reg-email-domain');
+        if (!domainSelect || !domainSelect.options || domainSelect.options.length <= 1) {
+            return;
+        }
+
+        const selectable = Array.from(domainSelect.options)
+            .map(opt => opt.value)
+            .filter(v => v);
+
+        if (selectable.length === 0) {
+            return;
+        }
+
+        const randomIndex = Math.floor(Math.random() * selectable.length);
+        domainSelect.value = selectable[randomIndex];
     }
 
     async loadAvailableDomains(randomSelect = false) {
@@ -181,9 +244,9 @@ class AdminMailboxManager {
             return;
         }
         
-        // 保存token
+        // 保存token，仅在当前会话内有效。
         this.authToken = password;
-        localStorage.setItem('admin_token', password);
+        sessionStorage.setItem('admin_token', password);
         
         // 验证token
         try {
@@ -196,13 +259,14 @@ class AdminMailboxManager {
             }
         } catch (error) {
             this.authToken = null;
-            localStorage.removeItem('admin_token');
+            sessionStorage.removeItem('admin_token');
             this.showError(errorDiv, '密码错误');
         }
     }
     
     logout() {
         this.authToken = null;
+        sessionStorage.removeItem('admin_token');
         localStorage.removeItem('admin_token');
         this.showLoginView();
     }
@@ -251,30 +315,180 @@ class AdminMailboxManager {
         } else if (viewName === 'sub-admins') {
             loadSubAdmins();
         } else if (viewName === 'register') {
-            // 重置注册表单
-            const form = document.getElementById('admin-register-form');
-            if (form) {
-                form.reset();
-                form.style.display = 'block';
-                // 清空邮箱输入
-                const prefixInput = document.getElementById('reg-email-prefix');
-                const domainSelect = document.getElementById('reg-email-domain');
-                if (prefixInput) prefixInput.value = '';
-                if (domainSelect) {
-                    domainSelect.innerHTML = '<option value="">选择域名...</option>';
-                }
-            }
-            const result = document.getElementById('register-result');
-            if (result) {
-                result.style.display = 'none';
-            }
-            // 加载可用域名列表
-            this.loadAvailableDomains();
+            this.resetRegisterView();
         }
     }
 
+    resetRegisterView() {
+        const form = document.getElementById('admin-register-form');
+        if (form) {
+            form.reset();
+            form.style.display = 'block';
+        }
+
+        // 默认回到单个创建
+        const singleRadio = document.querySelector('input[name="reg-create-mode"][value="single"]');
+        if (singleRadio) {
+            singleRadio.checked = true;
+        }
+
+        const batchCountInput = document.getElementById('reg-batch-count');
+        if (batchCountInput) {
+            batchCountInput.value = '2';
+        }
+
+        // 清空邮箱输入
+        const prefixInput = document.getElementById('reg-email-prefix');
+        const domainSelect = document.getElementById('reg-email-domain');
+        if (prefixInput) {
+            prefixInput.value = '';
+        }
+        if (domainSelect) {
+            domainSelect.innerHTML = '<option value="">选择域名...</option>';
+        }
+
+        // 清空结果
+        const result = document.getElementById('register-result');
+        if (result) {
+            result.style.display = 'none';
+            result.innerHTML = '';
+        }
+
+        this.applyRegisterModeToUi('single');
+        this.loadAvailableDomains(true);
+    }
+
+    getSelectedRegisterMode() {
+        const checked = document.querySelector('input[name="reg-create-mode"]:checked');
+        return checked && checked.value === 'batch' ? 'batch' : 'single';
+    }
+
+    applyRegisterModeToUi(mode) {
+        this.registerMode = mode === 'batch' ? 'batch' : 'single';
+
+        const batchCountGroup = document.getElementById('reg-batch-count-group');
+        const batchCountInput = document.getElementById('reg-batch-count');
+        const prefixInput = document.getElementById('reg-email-prefix');
+        const registerForm = document.getElementById('admin-register-form');
+        const submitBtn = registerForm ? registerForm.querySelector('button[type="submit"]') : null;
+
+        if (batchCountGroup) {
+            batchCountGroup.style.display = this.registerMode === 'batch' ? 'block' : 'none';
+        }
+        if (batchCountInput) {
+            batchCountInput.disabled = this.registerMode !== 'batch';
+        }
+
+        if (prefixInput) {
+            prefixInput.placeholder = this.registerMode === 'batch' ? '用户名前缀（如 abc）' : '用户名（如 alex4821）';
+        }
+
+        if (submitBtn) {
+            submitBtn.innerHTML = this.registerMode === 'batch'
+                ? '<i class="fas fa-layer-group"></i><span>批量创建</span>'
+                : '<i class="fas fa-plus"></i><span>创建邮箱</span>';
+        }
+    }
+
+    generateRandomUsername() {
+        const names = [
+            'alex', 'emma', 'oliver', 'mia', 'liam', 'sophia',
+            'noah', 'ava', 'jack', 'lily', 'lucas', 'grace',
+            'leo', 'ella', 'henry', 'chloe', 'james', 'zoey'
+        ];
+        const name = names[Math.floor(Math.random() * names.length)];
+        const digits = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+        return `${name}${digits}`;
+    }
+
+    isValidLocalPart(localPart) {
+        return /^[a-zA-Z0-9]{3,20}$/.test(localPart);
+    }
+
+    escapeHtml(text) {
+        return escapeHtml(text);
+    }
+
+    buildMailboxAccessPath(address, mailboxKey) {
+        // 分段编码凭据，避免邮箱特殊字符破坏 /web/<邮箱>----<密钥> 路由。
+        return `/web/${encodeURIComponent(address)}----${encodeURIComponent(mailboxKey)}`;
+    }
+
+    setRegisterSubmitting(isSubmitting) {
+        this.isRegistering = isSubmitting;
+        const form = document.getElementById('admin-register-form');
+        const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+        const randomBtn = document.getElementById('reg-random-btn');
+        const inputs = form ? form.querySelectorAll('input, textarea, select, button') : [];
+
+        if (inputs && inputs.length > 0) {
+            inputs.forEach(el => {
+                if (el === submitBtn) return;
+                if (el === randomBtn) return;
+                el.disabled = isSubmitting;
+            });
+        }
+
+        if (submitBtn) {
+            submitBtn.disabled = isSubmitting;
+            if (isSubmitting) {
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>创建中...</span>';
+            } else {
+                this.applyRegisterModeToUi(this.registerMode);
+            }
+        }
+
+        if (randomBtn) {
+            randomBtn.disabled = isSubmitting;
+        }
+    }
+
+    generateBatchAddresses(prefix, domain, count) {
+        const digits = Math.max(2, String(count).length);
+        const addresses = [];
+        for (let i = 1; i <= count; i++) {
+            const number = String(i).padStart(digits, '0');
+            addresses.push(`${prefix}${number}@${domain}`);
+        }
+        return { digits, addresses };
+    }
+
+    async createMailboxByAddress({ address, retentionDays, senderWhitelist, allowedDomains, whitelistEnabled }) {
+        const requestData = {
+            address,
+            retention_days: retentionDays,
+            sender_whitelist: senderWhitelist
+        };
+        if (allowedDomains.length > 0) {
+            requestData.allowed_domains = allowedDomains;
+        }
+
+        const response = await this.apiRequest('/api/admin/mailboxes', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+
+        if (!response.data || !response.data.mailbox_key) {
+            throw new Error('创建结果缺少邮箱密钥');
+        }
+
+        if (whitelistEnabled && senderWhitelist.length > 0) {
+            await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(response.data.id)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ whitelist_enabled: true })
+            });
+        }
+
+        return response.data;
+    }
+
     async handleRegister() {
-        const emailPrefix = document.getElementById('reg-email-prefix').value;
+        if (this.isRegistering) {
+            return;
+        }
+
+        const mode = this.getSelectedRegisterMode();
+        const emailPrefix = document.getElementById('reg-email-prefix').value.trim();
         const emailDomain = document.getElementById('reg-email-domain').value;
         const retentionDays = parseInt(document.getElementById('reg-retention-days').value);
         const whitelistText = document.getElementById('reg-sender-whitelist').value;
@@ -285,9 +499,6 @@ class AdminMailboxManager {
             this.showToast('error', '请输入完整的邮箱地址');
             return;
         }
-
-        // 组合邮箱地址
-        const address = `${emailPrefix}@${emailDomain}`;
 
         // 解析白名单
         const senderWhitelist = whitelistText
@@ -301,38 +512,65 @@ class AdminMailboxManager {
             .map(line => line.trim())
             .filter(line => line.length > 0);
 
-        try {
-            const requestData = {
-                address,
-                retention_days: retentionDays,
-                sender_whitelist: senderWhitelist
-            };
+        const commonOptions = {
+            retentionDays,
+            senderWhitelist,
+            allowedDomains,
+            whitelistEnabled
+        };
 
-            // 如果有允许的域名，添加到请求中
-            if (allowedDomains.length > 0) {
-                requestData.allowed_domains = allowedDomains;
+        if (mode === 'batch') {
+            const count = parseInt(document.getElementById('reg-batch-count').value);
+            if (!Number.isInteger(count) || count < 2 || count > 100) {
+                this.showToast('error', '创建数量必须为 2–100');
+                return;
             }
 
-            const response = await this.apiRequest('/api/admin/mailboxes', {
-                method: 'POST',
-                body: JSON.stringify(requestData)
+            if (!/^[a-zA-Z0-9]+$/.test(emailPrefix)) {
+                this.showToast('error', '批量前缀仅允许英文/数字');
+                return;
+            }
+
+            const { digits, addresses } = this.generateBatchAddresses(emailPrefix, emailDomain, count);
+            const maxLocalPartLen = emailPrefix.length + digits;
+            if (maxLocalPartLen > 20 || maxLocalPartLen < 3) {
+                this.showToast('error', '前缀+序号后长度必须为 3–20');
+                return;
+            }
+
+            // 兜底：确保任意生成的local-part都符合规则
+            const anyInvalid = addresses.some(addr => !this.isValidLocalPart(addr.split('@')[0]));
+            if (anyInvalid) {
+                this.showToast('error', '批量生成的用户名不符合规则，请调整前缀/数量');
+                return;
+            }
+
+            await this.handleBatchRegister({
+                addresses,
+                ...commonOptions
             });
+            return;
+        }
 
-            // 如果启用白名单，更新状态
-            if (whitelistEnabled && senderWhitelist.length > 0) {
-                await this.apiRequest(`/api/admin/mailboxes/${response.data.id}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        whitelist_enabled: true
-                    })
-                });
-            }
+        // 单个创建：校验local-part
+        if (!this.isValidLocalPart(emailPrefix)) {
+            this.showToast('error', '用户名仅允许英文/数字，长度 3–20');
+            return;
+        }
+
+        const address = `${emailPrefix}@${emailDomain}`;
+
+        try {
+            this.setRegisterSubmitting(true);
+            const mailbox = await this.createMailboxByAddress({ address, ...commonOptions });
 
             this.showToast('success', '邮箱创建成功');
 
             // 显示结果
             const form = document.getElementById('admin-register-form');
             const result = document.getElementById('register-result');
+            const accessPath = this.buildMailboxAccessPath(mailbox.address, mailbox.mailbox_key);
+            const accessUrl = `${window.location.origin}${accessPath}`;
 
             form.style.display = 'none';
             result.style.display = 'block';
@@ -344,35 +582,35 @@ class AdminMailboxManager {
                 <div class="mailbox-info">
                     <div class="info-item">
                         <label>邮箱地址</label>
-                        <div class="info-value address-value">${response.data.address}</div>
+                        <div class="info-value address-value">${escapeHtml(mailbox.address)}</div>
                     </div>
                     
                     <div class="info-item">
-                        <label>访问令牌</label>
+                        <label>邮箱密钥</label>
                         <div class="token-box">
-                            <code>${response.data.access_token}</code>
-                            <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${response.data.access_token}')">
+                            <code>${escapeHtml(mailbox.mailbox_key)}</code>
+                            <button class="btn btn-sm btn-secondary" type="button" data-action="copy-key">
                                 <i class="fas fa-copy"></i> 复制
                             </button>
                         </div>
                         <div class="warning-alert">
                             <i class="fas fa-exclamation-triangle"></i>
-                            <span>此令牌仅显示一次，请立即复制保存！</span>
+                            <span>密钥会包含在访问地址中，请按登录凭据妥善保管。</span>
                         </div>
                     </div>
                     
                     <div class="info-item">
                         <label>过期时间</label>
-                        <div class="info-value">${this.formatDate(response.data.expires_at)}</div>
+                        <div class="info-value">${escapeHtml(this.formatDate(mailbox.expires_at))}</div>
                     </div>
                     
                     <div class="info-item">
                         <label>邮箱访问地址</label>
                         <div class="info-value">
-                            <a href="/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}" target="_blank" class="access-link">
-                                ${window.location.origin}/mailbox?address=${encodeURIComponent(response.data.address)}...
+                            <a data-role="access-link" target="_blank" rel="noopener noreferrer" class="access-link">
+                                ${escapeHtml(accessUrl)}
                             </a>
-                            <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${window.location.origin}/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}')">
+                            <button class="btn btn-sm btn-secondary" type="button" data-action="copy-link">
                                 <i class="fas fa-copy"></i> 复制链接
                             </button>
                         </div>
@@ -380,25 +618,157 @@ class AdminMailboxManager {
                 </div>
                 
                 <div class="result-actions">
-                    <button class="btn btn-success" onclick="window.open('/mailbox?address=${encodeURIComponent(response.data.address)}&token=${response.data.access_token}', '_blank')">
+                    <button class="btn btn-success" type="button" data-action="open-mailbox">
                         <i class="fas fa-external-link-alt"></i>
                         打开邮箱
                     </button>
-                    <button class="btn btn-primary" onclick="adminManager.switchView('register'); document.getElementById('admin-register-form').style.display='block'; document.getElementById('register-result').style.display='none';">
+                    <button class="btn btn-primary" type="button" data-action="continue-register">
                         <i class="fas fa-plus"></i>
                         继续创建
                     </button>
-                    <button class="btn btn-secondary" onclick="adminManager.switchView('mailboxes')">
+                    <button class="btn btn-secondary" type="button" data-action="view-mailboxes">
                         <i class="fas fa-list"></i>
                         查看邮箱列表
                     </button>
                 </div>
             `;
 
+            // 外部凭据只通过 DOM 属性和闭包传递，避免拼入内联 JavaScript。
+            const accessLink = result.querySelector('[data-role="access-link"]');
+            accessLink.href = accessPath;
+            result.querySelector('[data-action="copy-key"]').addEventListener('click', () => {
+                copyToClipboard(mailbox.mailbox_key);
+            });
+            result.querySelector('[data-action="copy-link"]').addEventListener('click', () => {
+                copyToClipboard(accessUrl);
+            });
+            result.querySelector('[data-action="open-mailbox"]').addEventListener('click', () => {
+                window.open(accessPath, '_blank', 'noopener,noreferrer');
+            });
+            result.querySelector('[data-action="continue-register"]').addEventListener('click', () => {
+                this.switchView('register');
+            });
+            result.querySelector('[data-action="view-mailboxes"]').addEventListener('click', () => {
+                this.switchView('mailboxes');
+            });
+
             // 刷新统计
             this.loadStats();
         } catch (error) {
             this.showToast('error', error.message || '创建失败');
+        } finally {
+            this.setRegisterSubmitting(false);
+        }
+    }
+
+    async handleBatchRegister({ addresses, retentionDays, senderWhitelist, allowedDomains, whitelistEnabled }) {
+        const form = document.getElementById('admin-register-form');
+        const result = document.getElementById('register-result');
+
+        const results = [];
+
+        try {
+            this.setRegisterSubmitting(true);
+
+            for (let i = 0; i < addresses.length; i++) {
+                const address = addresses[i];
+                try {
+                    const mailbox = await this.createMailboxByAddress({
+                        address,
+                        retentionDays,
+                        senderWhitelist,
+                        allowedDomains,
+                        whitelistEnabled
+                    });
+
+                    results.push({
+                        success: true,
+                        address: mailbox.address,
+                        mailbox_key: mailbox.mailbox_key
+                    });
+                } catch (error) {
+                    results.push({
+                        success: false,
+                        address,
+                        error: error.message || '创建失败'
+                    });
+                }
+            }
+
+            const total = results.length;
+            const successCount = results.filter(r => r.success).length;
+            const failedCount = total - successCount;
+
+            this.showToast('success', `批量创建完成：成功 ${successCount}，失败 ${failedCount}`);
+
+            // 显示结果
+            if (form) form.style.display = 'none';
+            if (result) {
+                result.style.display = 'block';
+                result.innerHTML = `
+                    <div class="success-message">
+                        <i class="fas fa-check-circle"></i>
+                        <h3>批量创建完成</h3>
+                    </div>
+
+                    <div class="batch-result-summary">
+                        <div class="batch-summary-item">
+                            <div class="label">总请求数</div>
+                            <div class="value">${total}</div>
+                        </div>
+                        <div class="batch-summary-item">
+                            <div class="label">成功数</div>
+                            <div class="value">${successCount}</div>
+                        </div>
+                        <div class="batch-summary-item">
+                            <div class="label">失败数</div>
+                            <div class="value">${failedCount}</div>
+                        </div>
+                    </div>
+
+                    <div class="batch-result-list">
+                        ${results.map(item => {
+                            if (item.success) {
+                                const addressEscaped = this.escapeHtml(item.address);
+                                const openUrl = this.buildMailboxAccessPath(item.address, item.mailbox_key);
+                                return `
+                                    <div class="batch-result-item success">
+                                        <div class="address">${addressEscaped}</div>
+                                        <div class="detail"><a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">打开邮箱</a></div>
+                                    </div>
+                                `;
+                            }
+                            return `
+                                <div class="batch-result-item error">
+                                    <div class="address">${this.escapeHtml(item.address)}</div>
+                                    <div class="detail">${this.escapeHtml(item.error)}</div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+
+                    <div class="result-actions">
+                        <button class="btn btn-primary" type="button" data-action="continue-register">
+                            <i class="fas fa-plus"></i>
+                            继续创建
+                        </button>
+                        <button class="btn btn-secondary" type="button" data-action="view-mailboxes">
+                            <i class="fas fa-list"></i>
+                            查看邮箱列表
+                        </button>
+                    </div>
+                `;
+                result.querySelector('[data-action="continue-register"]').addEventListener('click', () => {
+                    this.switchView('register');
+                });
+                result.querySelector('[data-action="view-mailboxes"]').addEventListener('click', () => {
+                    this.switchView('mailboxes');
+                });
+            }
+
+            this.loadStats();
+        } finally {
+            this.setRegisterSubmitting(false);
         }
     }
     
@@ -464,9 +834,12 @@ class AdminMailboxManager {
     
     renderMailboxList(mailboxes) {
         const tbody = document.getElementById('mailbox-list');
+        const rows = Array.isArray(mailboxes) ? mailboxes : [];
 
-        if (mailboxes.length === 0) {
+        if (rows.length === 0) {
             tbody.innerHTML = '<tr><td colspan="9" class="empty-row">暂无数据</td></tr>';
+            tbody.onclick = null;
+            tbody.onchange = null;
             return;
         }
 
@@ -478,7 +851,7 @@ class AdminMailboxManager {
             'unknown': { text: '未知', class: 'source-unknown', icon: 'fa-question' }
         };
 
-        tbody.innerHTML = mailboxes.map(mailbox => {
+        tbody.innerHTML = rows.map((mailbox, index) => {
             const statusClass = mailbox.is_expired ? 'expired' : (mailbox.is_active ? 'active' : 'disabled');
             const statusText = mailbox.is_expired ? '已过期' : (mailbox.is_active ? '活跃' : '已禁用');
 
@@ -488,11 +861,11 @@ class AdminMailboxManager {
             return `
                 <tr>
                     <td>
-                        <input type="checkbox" class="mailbox-checkbox" value="${mailbox.id}" onchange="updateBatchDeleteButton()">
+                        <input type="checkbox" class="mailbox-checkbox" value="${escapeHtml(mailbox.id)}">
                     </td>
                     <td data-label="邮箱地址">
                         <div class="mailbox-address">
-                            ${mailbox.address}
+                            <span class="mailbox-address-text" title="${escapeHtml(mailbox.address)}">${escapeHtml(mailbox.address)}</span>
                             ${mailbox.whitelist_enabled ? '<i class="fas fa-shield-alt" title="已启用白名单"></i>' : ''}
                         </div>
                     </td>
@@ -503,19 +876,19 @@ class AdminMailboxManager {
                             ${sourceConfig.text}
                         </span>
                     </td>
-                    <td data-label="创建时间">${this.formatDate(mailbox.created_at)}</td>
-                    <td data-label="过期时间">${this.formatDate(mailbox.expires_at)}</td>
-                    <td data-label="邮件数">${mailbox.email_count}</td>
-                    <td data-label="未读">${mailbox.unread_count}</td>
+                    <td data-label="创建时间">${escapeHtml(this.formatDate(mailbox.created_at))}</td>
+                    <td data-label="过期时间">${escapeHtml(this.formatDate(mailbox.expires_at))}</td>
+                    <td data-label="邮件数">${escapeHtml(safeNumber(mailbox.email_count))}</td>
+                    <td data-label="未读">${escapeHtml(safeNumber(mailbox.unread_count))}</td>
                     <td class="actions-cell">
                         <div class="action-buttons">
-                            <button class="btn-icon" onclick="adminManager.viewMailbox('${mailbox.id}')" title="查看详情">
+                            <button class="btn-icon" type="button" data-action="view" data-mailbox-index="${index}" title="查看详情">
                                 <i class="fas fa-eye"></i>
                             </button>
-                            <button class="btn-icon" onclick="adminManager.editMailbox('${mailbox.id}')" title="编辑">
+                            <button class="btn-icon" type="button" data-action="edit" data-mailbox-index="${index}" title="编辑">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn-icon btn-danger" onclick="adminManager.deleteMailbox('${mailbox.id}')" title="删除">
+                            <button class="btn-icon btn-danger" type="button" data-action="delete" data-mailbox-index="${index}" title="删除">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -523,14 +896,38 @@ class AdminMailboxManager {
                 </tr>
             `;
         }).join('');
+
+        // 使用索引从当前响应取原值，避免把未信任 ID 拼入 onclick JavaScript。
+        tbody.onclick = (event) => {
+            const button = event.target.closest('button[data-mailbox-index]');
+            if (!button || !tbody.contains(button)) return;
+
+            const mailbox = rows[Number(button.dataset.mailboxIndex)];
+            if (!mailbox) return;
+
+            if (button.dataset.action === 'view') {
+                this.viewMailbox(mailbox.id);
+            } else if (button.dataset.action === 'edit') {
+                this.editMailbox(mailbox.id);
+            } else if (button.dataset.action === 'delete') {
+                this.deleteMailbox(mailbox.id);
+            }
+        };
+        tbody.onchange = (event) => {
+            if (event.target.matches('.mailbox-checkbox')) {
+                updateBatchDeleteButton();
+            }
+        };
     }
     
     renderPagination(data) {
         const pagination = document.getElementById('pagination');
-        const { page, total_pages } = data;
+        const page = Math.max(1, Math.trunc(safeNumber(data.page, 1)));
+        const totalPages = Math.max(1, Math.trunc(safeNumber(data.total_pages, 1)));
         
-        if (total_pages <= 1) {
+        if (totalPages <= 1) {
             pagination.innerHTML = '';
+            pagination.onclick = null;
             return;
         }
         
@@ -538,25 +935,30 @@ class AdminMailboxManager {
         
         // 上一页
         if (page > 1) {
-            html += `<button class="btn btn-sm" onclick="adminManager.goToPage(${page - 1})"><i class="fas fa-chevron-left"></i></button>`;
+            html += `<button class="btn btn-sm" type="button" data-page="${page - 1}"><i class="fas fa-chevron-left"></i></button>`;
         }
         
         // 页码
-        for (let i = 1; i <= total_pages; i++) {
-            if (i === 1 || i === total_pages || (i >= page - 2 && i <= page + 2)) {
-                html += `<button class="btn btn-sm ${i === page ? 'active' : ''}" onclick="adminManager.goToPage(${i})">${i}</button>`;
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                html += `<button class="btn btn-sm ${i === page ? 'active' : ''}" type="button" data-page="${i}">${i}</button>`;
             } else if (i === page - 3 || i === page + 3) {
                 html += '<span>...</span>';
             }
         }
         
         // 下一页
-        if (page < total_pages) {
-            html += `<button class="btn btn-sm" onclick="adminManager.goToPage(${page + 1})"><i class="fas fa-chevron-right"></i></button>`;
+        if (page < totalPages) {
+            html += `<button class="btn btn-sm" type="button" data-page="${page + 1}"><i class="fas fa-chevron-right"></i></button>`;
         }
         
         html += '</div>';
         pagination.innerHTML = html;
+        pagination.onclick = (event) => {
+            const button = event.target.closest('button[data-page]');
+            if (!button || !pagination.contains(button)) return;
+            this.goToPage(Number(button.dataset.page));
+        };
     }
     
     goToPage(page) {
@@ -587,11 +989,15 @@ class AdminMailboxManager {
     showToast(type, message) {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.innerHTML = `
-            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-            <span>${message}</span>
-        `;
+        const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
+        toast.className = `toast toast-${safeType}`;
+
+        const icon = document.createElement('i');
+        icon.className = `fas fa-${safeType === 'success' ? 'check-circle' : 'exclamation-circle'}`;
+        const text = document.createElement('span');
+        // API 错误信息可能包含外部输入，必须作为纯文本展示。
+        text.textContent = String(message ?? '');
+        toast.append(icon, text);
         container.appendChild(toast);
         
         setTimeout(() => {
@@ -657,11 +1063,11 @@ function showTokenModal(mailbox) {
             </div>
             <div class="modal-body">
                 <div class="token-display">
-                    <p><strong>邮箱地址：</strong>${mailbox.address}</p>
+                    <p><strong>邮箱地址：</strong><span data-role="mailbox-address"></span></p>
                     <p><strong>访问令牌（请妥善保存，仅显示一次）：</strong></p>
                     <div class="token-box">
-                        <code>${mailbox.access_token}</code>
-                        <button class="btn-icon" onclick="copyToClipboard('${mailbox.access_token}')" title="复制">
+                        <code data-role="access-token"></code>
+                        <button class="btn-icon" type="button" data-action="copy-token" title="复制">
                             <i class="fas fa-copy"></i>
                         </button>
                     </div>
@@ -672,26 +1078,47 @@ function showTokenModal(mailbox) {
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" onclick="this.closest('.modal').remove()">我已保存</button>
+                <button class="btn btn-primary" type="button" data-action="close">我已保存</button>
             </div>
         </div>
     `;
+    modal.querySelector('[data-role="mailbox-address"]').textContent = String(mailbox.address ?? '');
+    modal.querySelector('[data-role="access-token"]').textContent = String(mailbox.access_token ?? '');
+    modal.querySelector('[data-action="copy-token"]').addEventListener('click', () => {
+        copyToClipboard(mailbox.access_token);
+    });
+    modal.querySelector('[data-action="close"]').addEventListener('click', () => modal.remove());
     document.body.appendChild(modal);
 }
 
 function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
+    const value = String(text ?? '');
+    navigator.clipboard.writeText(value).then(() => {
         adminManager.showToast('success', '已复制到剪贴板');
     }).catch(() => {
-        adminManager.showToast('error', '复制失败');
+        // 降级方案
+        const input = document.createElement('input');
+        input.value = value;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        adminManager.showToast('success', '已复制到剪贴板');
     });
 }
 
 // 添加到AdminMailboxManager类
 AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
     try {
-        const response = await this.apiRequest(`/api/admin/mailboxes/${mailboxId}`);
+        const response = await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`);
         const mailbox = response.data;
+        const accessPath = this.buildMailboxAccessPath(mailbox.address, mailbox.mailbox_key);
+        const accessUrl = `${window.location.origin}${accessPath}`;
+        const senderWhitelist = Array.isArray(mailbox.sender_whitelist) ? mailbox.sender_whitelist : [];
+        const allowedDomains = Array.isArray(mailbox.allowed_domains) ? mailbox.allowed_domains : [];
+        const storagePercent = Math.min(100, Math.max(0, safeNumber(mailbox.storage_percent)));
+        const storageUsed = safeNumber(mailbox.storage_used_mb);
+        const storageLimit = safeNumber(mailbox.storage_limit_mb, 50);
 
         const modal = document.createElement('div');
         modal.className = 'modal show';
@@ -699,7 +1126,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
             <div class="modal-content modal-large">
                 <div class="modal-header">
                     <h3><i class="fas fa-inbox"></i> 邮箱详情</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
+                    <button class="modal-close" type="button" data-action="close">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -707,7 +1134,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                     <div class="detail-grid">
                         <div class="detail-item full-width">
                             <label><i class="fas fa-at"></i> 邮箱地址</label>
-                            <div class="address-value">${mailbox.address}</div>
+                            <div class="address-value">${escapeHtml(mailbox.address)}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-info-circle"></i> 状态</label>
@@ -719,30 +1146,30 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-calendar-plus"></i> 创建时间</label>
-                            <div>${this.formatDate(mailbox.created_at)}</div>
+                            <div>${escapeHtml(this.formatDate(mailbox.created_at))}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-hourglass-end"></i> 过期时间</label>
-                            <div>${this.formatDate(mailbox.expires_at)}</div>
+                            <div>${escapeHtml(this.formatDate(mailbox.expires_at))}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-stopwatch"></i> 保留天数</label>
-                            <div>${mailbox.retention_days} 天</div>
+                            <div>${escapeHtml(safeNumber(mailbox.retention_days))} 天</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-envelope"></i> 邮件统计</label>
-                            <div>总计 ${mailbox.email_count} 封，未读 ${mailbox.unread_count} 封</div>
+                            <div>总计 ${escapeHtml(safeNumber(mailbox.email_count))} 封，未读 ${escapeHtml(safeNumber(mailbox.unread_count))} 封</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-hdd"></i> 存储容量</label>
                             <div>
                                 <div class="storage-info">
                                     <div class="storage-bar">
-                                        <div class="storage-used" style="width: ${mailbox.storage_percent || 0}%"></div>
+                                        <div class="storage-used" style="width: ${storagePercent}%"></div>
                                     </div>
                                     <div class="storage-text">
-                                        ${(mailbox.storage_used_mb || 0).toFixed(2)} MB / ${(mailbox.storage_limit_mb || 50).toFixed(2)} MB
-                                        (${(mailbox.storage_percent || 0).toFixed(1)}%)
+                                        ${storageUsed.toFixed(2)} MB / ${storageLimit.toFixed(2)} MB
+                                        (${storagePercent.toFixed(1)}%)
                                     </div>
                                 </div>
                             </div>
@@ -753,17 +1180,17 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                         </div>
                         <div class="detail-item full-width">
                             <label><i class="fas fa-list-alt"></i> 发件人白名单</label>
-                            <div>${mailbox.sender_whitelist.length > 0 ? mailbox.sender_whitelist.join(', ') : '无'}</div>
+                            <div>${escapeHtml(senderWhitelist.length > 0 ? senderWhitelist.join(', ') : '无')}</div>
                         </div>
                         <div class="detail-item full-width">
                             <label><i class="fas fa-globe"></i> 允许的域名</label>
-                            <div>${mailbox.allowed_domains && mailbox.allowed_domains.length > 0 ? mailbox.allowed_domains.join(', ') : '无限制'}</div>
+                            <div>${escapeHtml(allowedDomains.length > 0 ? allowedDomains.join(', ') : '无限制')}</div>
                         </div>
                         <div class="detail-item full-width">
                             <label><i class="fas fa-key"></i> 访问令牌 (Access Token)</label>
                             <div class="token-display-inline">
-                                <code>${mailbox.access_token}</code>
-                                <button class="btn-icon" onclick="copyToClipboard('${mailbox.access_token}')" title="复制">
+                                <code>${escapeHtml(mailbox.access_token)}</code>
+                                <button class="btn-icon" type="button" data-action="copy-token" title="复制">
                                     <i class="fas fa-copy"></i>
                                 </button>
                             </div>
@@ -771,27 +1198,27 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                         <div class="detail-item full-width">
                             <label><i class="fas fa-lock"></i> 邮箱密钥 (Mailbox Key)</label>
                             <div class="token-display-inline">
-                                <code>${mailbox.mailbox_key}</code>
-                                <button class="btn-icon" onclick="copyToClipboard('${mailbox.mailbox_key}')" title="复制">
+                                <code>${escapeHtml(mailbox.mailbox_key)}</code>
+                                <button class="btn-icon" type="button" data-action="copy-key" title="复制">
                                     <i class="fas fa-copy"></i>
                                 </button>
                             </div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-network-wired"></i> 创建IP</label>
-                            <div>${mailbox.created_by_ip || '-'}</div>
+                            <div>${escapeHtml(mailbox.created_by_ip || '-')}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-history"></i> 最后访问</label>
-                            <div>${this.formatDate(mailbox.last_accessed)}</div>
+                            <div>${escapeHtml(this.formatDate(mailbox.last_accessed))}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-user-shield"></i> 最后更新管理员</label>
-                            <div>${mailbox.updated_by_admin || '-'}</div>
+                            <div>${escapeHtml(mailbox.updated_by_admin || '-')}</div>
                         </div>
                         <div class="detail-item">
                             <label><i class="fas fa-pen-square"></i> 最后更新时间</label>
-                            <div>${this.formatDate(mailbox.updated_at)}</div>
+                            <div>${escapeHtml(this.formatDate(mailbox.updated_at))}</div>
                         </div>
                         <div class="detail-item full-width quick-access-box">
                             <div class="quick-access-label">
@@ -799,12 +1226,12 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                                 🎯 快速访问链接
                             </div>
                             <div class="quick-access-content">
-                                <div class="quick-access-url">${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}</div>
+                                <div class="quick-access-url">${escapeHtml(accessUrl)}</div>
                                 <div class="quick-access-actions">
-                                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${window.location.origin}/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}')" title="复制链接">
+                                    <button class="btn btn-sm btn-secondary" type="button" data-action="copy-link" title="复制链接">
                                         <i class="fas fa-copy"></i> 复制
                                     </button>
-                                    <a href="/mailbox?address=${encodeURIComponent(mailbox.address)}&token=${mailbox.access_token}" target="_blank" class="btn btn-sm btn-primary">
+                                    <a data-role="access-link" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary">
                                         <i class="fas fa-external-link-alt"></i> 打开
                                     </a>
                                 </div>
@@ -813,17 +1240,17 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
-                    <button class="btn btn-warning" onclick="resetMailboxToken('${mailboxId}'); this.closest('.modal').remove();">
+                    <button class="btn btn-secondary" type="button" data-action="close">关闭</button>
+                    <button class="btn btn-warning" type="button" data-action="reset-token">
                         <i class="fas fa-key"></i>
                         重置令牌
                     </button>
-                    <button class="btn btn-primary" onclick="adminManager.editMailbox('${mailboxId}'); this.closest('.modal').remove();">
+                    <button class="btn btn-primary" type="button" data-action="edit">
                         <i class="fas fa-edit"></i>
                         编辑
                     </button>
                     ${!mailbox.is_active ?
-                        `<button class="btn btn-success" onclick="enableMailbox('${mailboxId}'); this.closest('.modal').remove();">
+                        `<button class="btn btn-success" type="button" data-action="enable">
                             <i class="fas fa-undo"></i>
                             恢复邮箱
                         </button>` : ''
@@ -831,6 +1258,34 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                 </div>
             </div>
         `;
+        modal.querySelector('[data-role="access-link"]').href = accessPath;
+        modal.querySelectorAll('[data-action="close"]').forEach(button => {
+            button.addEventListener('click', () => modal.remove());
+        });
+        modal.querySelector('[data-action="copy-token"]').addEventListener('click', () => {
+            copyToClipboard(mailbox.access_token);
+        });
+        modal.querySelector('[data-action="copy-key"]').addEventListener('click', () => {
+            copyToClipboard(mailbox.mailbox_key);
+        });
+        modal.querySelector('[data-action="copy-link"]').addEventListener('click', () => {
+            copyToClipboard(accessUrl);
+        });
+        modal.querySelector('[data-action="reset-token"]').addEventListener('click', () => {
+            modal.remove();
+            resetMailboxToken(mailboxId);
+        });
+        modal.querySelector('[data-action="edit"]').addEventListener('click', () => {
+            modal.remove();
+            this.editMailbox(mailboxId);
+        });
+        const enableButton = modal.querySelector('[data-action="enable"]');
+        if (enableButton) {
+            enableButton.addEventListener('click', () => {
+                modal.remove();
+                enableMailbox(mailboxId);
+            });
+        }
         document.body.appendChild(modal);
     } catch (error) {
         this.showToast('error', '加载邮箱详情失败');
@@ -839,8 +1294,10 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
 
 AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
     try {
-        const response = await this.apiRequest(`/api/admin/mailboxes/${mailboxId}`);
+        const response = await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`);
         const mailbox = response.data;
+        const senderWhitelist = Array.isArray(mailbox.sender_whitelist) ? mailbox.sender_whitelist : [];
+        const allowedDomains = Array.isArray(mailbox.allowed_domains) ? mailbox.allowed_domains : [];
 
         const modal = document.createElement('div');
         modal.className = 'modal show';
@@ -848,7 +1305,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
             <div class="modal-content">
                 <div class="modal-header">
                     <h3>编辑邮箱</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
+                    <button class="modal-close" type="button" data-action="close">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -856,43 +1313,56 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
                     <form id="edit-mailbox-form">
                         <div class="form-group">
                             <label>邮箱地址</label>
-                            <input type="text" value="${mailbox.address}" disabled>
+                            <input type="text" data-role="mailbox-address" disabled>
                         </div>
                         <div class="form-group">
                             <label for="edit-retention-days">保留天数</label>
-                            <input type="number" id="edit-retention-days" value="${mailbox.retention_days}" min="1" max="36500">
+                            <input type="number" id="edit-retention-days" min="1" max="36500">
                         </div>
                         <div class="form-group">
                             <label for="edit-sender-whitelist">发件人白名单</label>
-                            <textarea id="edit-sender-whitelist" rows="3">${mailbox.sender_whitelist.join('\n')}</textarea>
+                            <textarea id="edit-sender-whitelist" rows="3"></textarea>
                         </div>
                         <div class="form-group">
                             <label for="edit-allowed-domains">允许的域名</label>
-                            <textarea id="edit-allowed-domains" rows="3">${mailbox.allowed_domains ? mailbox.allowed_domains.join('\n') : ''}</textarea>
+                            <textarea id="edit-allowed-domains" rows="3"></textarea>
                         </div>
                         <div class="form-group">
                             <label>
-                                <input type="checkbox" id="edit-whitelist-enabled" ${mailbox.whitelist_enabled ? 'checked' : ''}>
+                                <input type="checkbox" id="edit-whitelist-enabled">
                                 启用白名单过滤
                             </label>
                         </div>
                         <div class="form-group">
                             <label>
-                                <input type="checkbox" id="edit-is-active" ${mailbox.is_active ? 'checked' : ''}>
+                                <input type="checkbox" id="edit-is-active">
                                 邮箱激活状态
                             </label>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">取消</button>
-                    <button class="btn btn-primary" onclick="adminManager.saveMailboxEdit('${mailboxId}', this.closest('.modal'))">
+                    <button class="btn btn-secondary" type="button" data-action="close">取消</button>
+                    <button class="btn btn-primary" type="button" data-action="save">
                         <i class="fas fa-save"></i>
                         保存
                     </button>
                 </div>
             </div>
         `;
+        // 表单值通过 value/textContent 属性写入，避免 textarea 与属性上下文注入。
+        modal.querySelector('[data-role="mailbox-address"]').value = String(mailbox.address ?? '');
+        modal.querySelector('#edit-retention-days').value = String(safeNumber(mailbox.retention_days, 30));
+        modal.querySelector('#edit-sender-whitelist').value = senderWhitelist.join('\n');
+        modal.querySelector('#edit-allowed-domains').value = allowedDomains.join('\n');
+        modal.querySelector('#edit-whitelist-enabled').checked = Boolean(mailbox.whitelist_enabled);
+        modal.querySelector('#edit-is-active').checked = Boolean(mailbox.is_active);
+        modal.querySelectorAll('[data-action="close"]').forEach(button => {
+            button.addEventListener('click', () => modal.remove());
+        });
+        modal.querySelector('[data-action="save"]').addEventListener('click', () => {
+            this.saveMailboxEdit(mailboxId, modal);
+        });
         document.body.appendChild(modal);
     } catch (error) {
         this.showToast('error', '加载邮箱信息失败');
@@ -929,7 +1399,7 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
             updates.allowed_domains = allowedDomains;
         }
 
-        await this.apiRequest(`/api/admin/mailboxes/${mailboxId}`, {
+        await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`, {
             method: 'PUT',
             body: JSON.stringify(updates)
         });
@@ -954,7 +1424,7 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
         <div class="modal-content">
             <div class="modal-header">
                 <h3>确认删除</h3>
-                <button class="modal-close" onclick="this.closest('.modal').remove()">
+                <button class="modal-close" type="button" data-action="close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -974,20 +1444,26 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">取消</button>
-                <button class="btn btn-danger" onclick="adminManager.confirmDeleteMailbox('${mailboxId}', this.closest('.modal'))">
+                <button class="btn btn-secondary" type="button" data-action="close">取消</button>
+                <button class="btn btn-danger" type="button" data-action="confirm">
                     <i class="fas fa-trash"></i>
                     确认删除
                 </button>
             </div>
         </div>
     `;
+    modal.querySelectorAll('[data-action="close"]').forEach(button => {
+        button.addEventListener('click', () => modal.remove());
+    });
+    modal.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        this.confirmDeleteMailbox(mailboxId, modal);
+    });
     document.body.appendChild(modal);
 };
 
 AdminMailboxManager.prototype.confirmDeleteMailbox = async function(mailboxId, modal) {
     try {
-        await this.apiRequest(`/api/admin/mailboxes/${mailboxId}?soft=true`, {
+        await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}?soft=true`, {
             method: 'DELETE'
         });
 
@@ -1009,29 +1485,36 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
 
     try {
         const response = await this.apiRequest('/api/admin/audit-logs?limit=100');
-        const logs = response.data;
+        const logs = Array.isArray(response.data) ? response.data : [];
 
         if (logs.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="empty-row">暂无审计日志</td></tr>';
             return;
         }
 
-        tbody.innerHTML = logs.map(log => `
+        tbody.innerHTML = logs.map((log, index) => `
             <tr>
-                <td data-label="时间">${this.formatDate(log.timestamp)}</td>
-                <td data-label="操作"><span class="action-badge action-${log.action.toLowerCase()}">${log.action}</span></td>
-                <td data-label="邮箱ID"><code>${log.mailbox_id || '-'}</code></td>
-                <td data-label="管理员">${log.admin_user || '-'}</td>
-                <td data-label="IP地址">${log.ip_address || '-'}</td>
+                <td data-label="时间">${escapeHtml(this.formatDate(log.timestamp))}</td>
+                <td data-label="操作"><span class="action-badge action-${safeCssToken(log.action)}">${escapeHtml(log.action || '-')}</span></td>
+                <td data-label="邮箱ID"><code>${escapeHtml(log.mailbox_id || '-')}</code></td>
+                <td data-label="管理员">${escapeHtml(log.admin_user || '-')}</td>
+                <td data-label="IP地址">${escapeHtml(log.ip_address || '-')}</td>
                 <td class="actions-cell">
                     <div class="action-buttons">
-                        <button class="btn-icon" onclick="adminManager.showAuditDetail(${JSON.stringify(log).replace(/"/g, '&quot;')})" title="查看详情">
+                        <button class="btn-icon" type="button" data-log-index="${index}" title="查看详情">
                             <i class="fas fa-info-circle"></i>
                         </button>
                     </div>
                 </td>
             </tr>
         `).join('');
+        // 日志对象仅保留在闭包中，不能序列化进 onclick 属性。
+        tbody.onclick = (event) => {
+            const button = event.target.closest('button[data-log-index]');
+            if (!button || !tbody.contains(button)) return;
+            const log = logs[Number(button.dataset.logIndex)];
+            if (log) this.showAuditDetail(log);
+        };
     } catch (error) {
         console.error('加载审计日志失败:', error);
         tbody.innerHTML = '<tr><td colspan="6" class="error-row">加载失败</td></tr>';
@@ -1042,38 +1525,12 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
 AdminMailboxManager.prototype.showAuditDetail = function(log) {
     const modal = document.createElement('div');
     modal.className = 'modal show';
-    
-    // 格式化 JSON 显示
-    const formatJSON = (obj) => {
-        if (!obj) return '<span class="text-muted">无数据</span>';
-        try {
-            const json = JSON.stringify(obj, null, 2);
-            // 简单的语法高亮
-            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
-                let cls = 'json-number';
-                if (/^"/.test(match)) {
-                    if (/:$/.test(match)) {
-                        cls = 'json-key';
-                    } else {
-                        cls = 'json-string';
-                    }
-                } else if (/true|false/.test(match)) {
-                    cls = 'json-boolean';
-                } else if (/null/.test(match)) {
-                    cls = 'json-null';
-                }
-                return '<span class="' + cls + '">' + match + '</span>';
-            });
-        } catch (e) {
-            return String(obj);
-        }
-    };
 
     modal.innerHTML = `
         <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-info-circle"></i> 审计日志详情</h3>
-                <button class="modal-close" onclick="this.closest('.modal').remove()">
+                <div class="modal-header">
+                    <h3><i class="fas fa-info-circle"></i> 审计日志详情</h3>
+                    <button class="modal-close" type="button" data-action="close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -1081,35 +1538,48 @@ AdminMailboxManager.prototype.showAuditDetail = function(log) {
                 <div class="detail-grid">
                     <div class="detail-item">
                         <label><i class="fas fa-clock"></i> 时间</label>
-                        <div>${this.formatDate(log.timestamp)}</div>
+                        <div>${escapeHtml(this.formatDate(log.timestamp))}</div>
                     </div>
                     <div class="detail-item">
                         <label><i class="fas fa-tag"></i> 操作</label>
-                        <div><span class="action-badge action-${log.action.toLowerCase()}">${log.action}</span></div>
+                        <div><span class="action-badge action-${safeCssToken(log.action)}">${escapeHtml(log.action || '-')}</span></div>
                     </div>
                     <div class="detail-item">
                         <label><i class="fas fa-inbox"></i> 邮箱ID</label>
-                        <div><code>${log.mailbox_id || '-'}</code></div>
+                        <div><code>${escapeHtml(log.mailbox_id || '-')}</code></div>
                     </div>
                     <div class="detail-item">
                         <label><i class="fas fa-user-shield"></i> 管理员</label>
-                        <div>${log.admin_user || '-'}</div>
+                        <div>${escapeHtml(log.admin_user || '-')}</div>
                     </div>
                     <div class="detail-item">
                         <label><i class="fas fa-network-wired"></i> IP地址</label>
-                        <div>${log.ip_address || '-'}</div>
+                        <div>${escapeHtml(log.ip_address || '-')}</div>
                     </div>
                     <div class="detail-item full-width">
                         <label><i class="fas fa-file-code"></i> 变更内容</label>
-                        <div class="audit-log-content json-viewer">${formatJSON(log.changes)}</div>
+                        <pre class="audit-log-content json-viewer" data-role="changes"></pre>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
+                <button class="btn btn-secondary" type="button" data-action="close">关闭</button>
             </div>
         </div>
     `;
+    // 审计 changes 可能含任意数据库内容，纯文本展示比手写 HTML 高亮更可靠。
+    let changesText = '无数据';
+    if (log.changes !== null && log.changes !== undefined) {
+        try {
+            changesText = JSON.stringify(log.changes, null, 2) ?? String(log.changes);
+        } catch (error) {
+            changesText = String(log.changes);
+        }
+    }
+    modal.querySelector('[data-role="changes"]').textContent = changesText;
+    modal.querySelectorAll('[data-action="close"]').forEach(button => {
+        button.addEventListener('click', () => modal.remove());
+    });
     document.body.appendChild(modal);
 };
 
@@ -1149,21 +1619,32 @@ async function batchDeleteMailboxes() {
 
     // 创建确认模态框
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal show';
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-exclamation-triangle"></i> 确认批量删除</h3>
+                <h3>确认批量删除</h3>
+                <button class="modal-close" type="button" data-action="close">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div class="modal-body">
                 <p>确定要删除选中的 <strong>${mailboxIds.length}</strong> 个邮箱吗？</p>
-                <p class="text-secondary">删除后可以在详情界面恢复。</p>
+                <div class="alert alert-warning">
+                    <i class="fas fa-info-circle"></i>
+                    <div>
+                        <strong>软删除说明：</strong>
+                        <ul style="margin: 8px 0 0 20px; padding: 0;">
+                            <li>邮箱将被批量标记为"已禁用"</li>
+                            <li>用户无法继续访问</li>
+                            <li>数据保留在数据库中</li>
+                            <li>可以通过"恢复"功能重新启用</li>
+                        </ul>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
-                    <i class="fas fa-times"></i>
-                    取消
-                </button>
+                <button class="btn btn-secondary" type="button" data-action="close">取消</button>
                 <button class="btn btn-danger" id="confirm-batch-delete-btn">
                     <i class="fas fa-trash"></i>
                     确认删除
@@ -1173,8 +1654,12 @@ async function batchDeleteMailboxes() {
     `;
     document.body.appendChild(modal);
 
+    modal.querySelectorAll('[data-action="close"]').forEach(button => {
+        button.addEventListener('click', () => modal.remove());
+    });
+
     // 绑定确认按钮事件
-    document.getElementById('confirm-batch-delete-btn').onclick = async () => {
+    modal.querySelector('#confirm-batch-delete-btn').onclick = async () => {
         try {
             modal.remove();
 
@@ -1207,7 +1692,7 @@ async function resetMailboxToken(mailboxId) {
     }
 
     try {
-        const response = await adminManager.apiRequest(`/api/admin/mailboxes/${mailboxId}/reset-token`, {
+        const response = await adminManager.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}/reset-token`, {
             method: 'POST'
         });
 
@@ -1218,7 +1703,7 @@ async function resetMailboxToken(mailboxId) {
             <div class="modal-content">
                 <div class="modal-header">
                     <h3><i class="fas fa-key"></i> 新的访问令牌</h3>
-                    <button class="close-btn" onclick="this.closest('.modal').remove()">
+                    <button class="close-btn" type="button" data-action="close">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -1230,18 +1715,26 @@ async function resetMailboxToken(mailboxId) {
                     <div class="form-group">
                         <label>新访问令牌：</label>
                         <div style="display: flex; gap: 8px;">
-                            <input type="text" value="${response.data.new_token}" readonly style="flex: 1;">
-                            <button class="btn btn-primary" onclick="copyToClipboard('${response.data.new_token}')">
+                            <input type="text" data-role="new-token" readonly style="flex: 1;">
+                            <button class="btn btn-primary" type="button" data-action="copy-token">
                                 <i class="fas fa-copy"></i> 复制
                             </button>
                         </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
+                    <button class="btn btn-secondary" type="button" data-action="close">关闭</button>
                 </div>
             </div>
         `;
+        const newToken = String(response.data.new_token ?? '');
+        modal.querySelector('[data-role="new-token"]').value = newToken;
+        modal.querySelector('[data-action="copy-token"]').addEventListener('click', () => {
+            copyToClipboard(newToken);
+        });
+        modal.querySelectorAll('[data-action="close"]').forEach(button => {
+            button.addEventListener('click', () => modal.remove());
+        });
         document.body.appendChild(modal);
 
         adminManager.showToast('success', '令牌重置成功');
@@ -1257,7 +1750,7 @@ async function enableMailbox(mailboxId) {
     }
 
     try {
-        await adminManager.apiRequest(`/api/admin/mailboxes/${mailboxId}/enable`, {
+        await adminManager.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}/enable`, {
             method: 'POST'
         });
 
@@ -1266,22 +1759,6 @@ async function enableMailbox(mailboxId) {
     } catch (error) {
         adminManager.showToast('error', '恢复失败: ' + error.message);
     }
-}
-
-// 复制到剪贴板
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        adminManager.showToast('success', '已复制到剪贴板');
-    }).catch(() => {
-        // 降级方案
-        const input = document.createElement('input');
-        input.value = text;
-        document.body.appendChild(input);
-        input.select();
-        document.execCommand('copy');
-        document.body.removeChild(input);
-        adminManager.showToast('success', '已复制到剪贴板');
-    });
 }
 
 // 刷新安全信息
@@ -1298,25 +1775,31 @@ async function loadBlockedIPs() {
 
     try {
         const response = await adminManager.apiRequest('/api/admin/blocked-ips');
-        const blockedIPs = response.data.blocked_ips;
+        const blockedIPs = Array.isArray(response.data.blocked_ips) ? response.data.blocked_ips : [];
 
         if (blockedIPs.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" class="empty-row">当前没有被封禁的IP</td></tr>';
             return;
         }
 
-        tbody.innerHTML = blockedIPs.map(item => `
+        tbody.innerHTML = blockedIPs.map((item, index) => `
             <tr>
-                <td><code>${item.ip}</code></td>
-                <td>${formatSeconds(item.remaining_seconds)}</td>
+                <td><code>${escapeHtml(item.ip)}</code></td>
+                <td>${escapeHtml(formatSeconds(safeNumber(item.remaining_seconds)))}</td>
                 <td>
-                    <button class="btn btn-sm btn-warning" onclick="unblockIP('${item.ip}')">
+                    <button class="btn btn-sm btn-warning" type="button" data-ip-index="${index}">
                         <i class="fas fa-unlock"></i>
                         解除封禁
                     </button>
                 </td>
             </tr>
         `).join('');
+        tbody.onclick = (event) => {
+            const button = event.target.closest('button[data-ip-index]');
+            if (!button || !tbody.contains(button)) return;
+            const item = blockedIPs[Number(button.dataset.ipIndex)];
+            if (item) unblockIP(item.ip);
+        };
     } catch (error) {
         tbody.innerHTML = '<tr><td colspan="3" class="error-row">加载失败</td></tr>';
         adminManager.showToast('error', '加载被封禁IP失败');
@@ -1330,7 +1813,7 @@ async function unblockIP(ip) {
     }
 
     try {
-        await adminManager.apiRequest(`/api/admin/blocked-ips/${ip}`, {
+        await adminManager.apiRequest(`/api/admin/blocked-ips/${encodeURIComponent(ip)}`, {
             method: 'DELETE'
         });
 
@@ -1380,7 +1863,8 @@ async function loadSourceStats() {
 
         for (const [source, count] of Object.entries(sourceStats)) {
             const config = sourceConfig[source] || sourceConfig['unknown'];
-            total += count;
+            const safeCount = Math.max(0, Math.trunc(safeNumber(count)));
+            total += safeCount;
             html += `
                 <div class="stat-card">
                     <div class="stat-icon" style="background: ${config.gradient};">
@@ -1388,7 +1872,7 @@ async function loadSourceStats() {
                     </div>
                     <div class="stat-info">
                         <div class="stat-label">${config.label}</div>
-                        <div class="stat-value">${count}</div>
+                        <div class="stat-value">${safeCount}</div>
                     </div>
                 </div>
             `;
@@ -1502,8 +1986,9 @@ async function loadSubAdmins() {
 // 显示子管理员列表
 function displaySubAdmins(subAdmins) {
     const tbody = document.getElementById('sub-admins-tbody');
+    const rows = Array.isArray(subAdmins) ? subAdmins : [];
 
-    if (!subAdmins || subAdmins.length === 0) {
+    if (rows.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="empty-cell">
@@ -1512,44 +1997,62 @@ function displaySubAdmins(subAdmins) {
                 </td>
             </tr>
         `;
+        tbody.onclick = null;
         return;
     }
 
-    tbody.innerHTML = subAdmins.map(admin => `
-        <tr>
-            <td data-label="Token"><code>${admin.token}</code></td>
-            <td data-label="可创建域名">
-                <div class="domains-tags">
-                    ${admin.domains.map(d => `<span class="domain-tag">${d}</span>`).join('')}
-                </div>
-            </td>
-            <td data-label="发件人白名单">
-                <div class="domains-tags">
-                    ${admin.sender_whitelist && admin.sender_whitelist.length > 0
-                        ? admin.sender_whitelist.map(d => `<span class="domain-tag">${d}</span>`).join('')
-                        : '<span class="text-muted">不限制</span>'}
-                </div>
-            </td>
-            <td data-label="最长保留天数">${admin.max_retention_days || 30} 天</td>
-            <td data-label="状态">
-                <span class="status-badge ${admin.is_active ? 'status-active' : 'status-inactive'}">
-                    ${admin.is_active ? '启用' : '禁用'}
-                </span>
-            </td>
-            <td data-label="创建时间">${adminManager.formatDate(admin.created_at)}</td>
-            <td data-label="备注">${admin.notes || '-'}</td>
-            <td class="actions-cell">
-                <div class="action-buttons">
-                    <button class="btn-icon" onclick="editSubAdmin('${admin.id}')">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn-icon btn-danger" onclick="deleteSubAdmin('${admin.id}', '${admin.token}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </td>
-        </tr>
-    `).join('');
+    tbody.innerHTML = rows.map((admin, index) => {
+        const domains = Array.isArray(admin.domains) ? admin.domains : [];
+        const senderWhitelist = Array.isArray(admin.sender_whitelist) ? admin.sender_whitelist : [];
+        return `
+            <tr>
+                <td data-label="Token"><code>${escapeHtml(admin.token)}</code></td>
+                <td data-label="可创建域名">
+                    <div class="domains-tags">
+                        ${domains.map(domain => `<span class="domain-tag">${escapeHtml(domain)}</span>`).join('')}
+                    </div>
+                </td>
+                <td data-label="发件人白名单">
+                    <div class="domains-tags">
+                        ${senderWhitelist.length > 0
+                            ? senderWhitelist.map(domain => `<span class="domain-tag">${escapeHtml(domain)}</span>`).join('')
+                            : '<span class="text-muted">不限制</span>'}
+                    </div>
+                </td>
+                <td data-label="最长保留天数">${escapeHtml(safeNumber(admin.max_retention_days, 30))} 天</td>
+                <td data-label="状态">
+                    <span class="status-badge ${admin.is_active ? 'status-active' : 'status-inactive'}">
+                        ${admin.is_active ? '启用' : '禁用'}
+                    </span>
+                </td>
+                <td data-label="创建时间">${escapeHtml(adminManager.formatDate(admin.created_at))}</td>
+                <td data-label="备注">${escapeHtml(admin.notes || '-')}</td>
+                <td class="actions-cell">
+                    <div class="action-buttons">
+                        <button class="btn-icon" type="button" data-action="edit" data-admin-index="${index}">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-icon btn-danger" type="button" data-action="delete" data-admin-index="${index}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // 子管理员 token/ID 不进入内联脚本，点击时从闭包按索引读取。
+    tbody.onclick = (event) => {
+        const button = event.target.closest('button[data-admin-index]');
+        if (!button || !tbody.contains(button)) return;
+        const admin = rows[Number(button.dataset.adminIndex)];
+        if (!admin) return;
+        if (button.dataset.action === 'edit') {
+            editSubAdmin(admin.id);
+        } else if (button.dataset.action === 'delete') {
+            deleteSubAdmin(admin.id, admin.token);
+        }
+    };
 }
 
 // 显示创建子管理员模态框
@@ -1614,15 +2117,23 @@ async function loadDomainsForSubAdmin(selectedDomains = []) {
 
         const domainsContainer = document.getElementById('sub-admin-domains-container');
 
-        if (response.ok && result.available_domains) {
-            // 可创建的域名
-            domainsContainer.innerHTML = result.available_domains.map(domain => `
-                <label class="checkbox-label">
-                    <input type="checkbox" name="sub-admin-domain" value="${domain}"
-                        ${selectedDomains.includes(domain) ? 'checked' : ''}>
-                    ${domain}
-                </label>
-            `).join('');
+        if (response.ok && Array.isArray(result.available_domains)) {
+            // 域名来自 API，使用 DOM 属性和文本节点写入，彻底隔离 HTML 上下文。
+            domainsContainer.replaceChildren();
+            const selected = new Set(Array.isArray(selectedDomains) ? selectedDomains : []);
+            result.available_domains.forEach(domain => {
+                const label = document.createElement('label');
+                label.className = 'checkbox-label';
+
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.name = 'sub-admin-domain';
+                input.value = String(domain ?? '');
+                input.checked = selected.has(domain);
+
+                label.append(input, document.createTextNode(` ${String(domain ?? '')}`));
+                domainsContainer.appendChild(label);
+            });
         } else {
             domainsContainer.innerHTML = '<p class="text-muted">无可用域名</p>';
         }
@@ -1687,7 +2198,7 @@ async function saveSubAdmin(event) {
                 notes: notes
             };
 
-            response = await adminManager.apiRequest(`/api/admin/sub-admins/${subAdminId}`, {
+            response = await adminManager.apiRequest(`/api/admin/sub-admins/${encodeURIComponent(subAdminId)}`, {
                 method: 'PUT',
                 body: JSON.stringify(updateData)
             });
@@ -1725,7 +2236,7 @@ async function deleteSubAdmin(subAdminId, token) {
     }
 
     try {
-        const response = await adminManager.apiRequest(`/api/admin/sub-admins/${subAdminId}`, {
+        const response = await adminManager.apiRequest(`/api/admin/sub-admins/${encodeURIComponent(subAdminId)}`, {
             method: 'DELETE'
         });
 
@@ -1748,4 +2259,3 @@ document.addEventListener('DOMContentLoaded', () => {
         subAdminForm.addEventListener('submit', saveSubAdmin);
     }
 });
-

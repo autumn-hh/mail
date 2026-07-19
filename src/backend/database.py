@@ -81,6 +81,19 @@ class DatabaseManager:
                 # 字段已存在，忽略错误
                 pass
 
+            # 为升级前创建的邮箱补齐新密钥，确保唯一的 /web 凭据入口可用。
+            missing_key_rows = conn.execute('''
+                SELECT id FROM mailboxes
+                WHERE mailbox_key IS NULL OR TRIM(mailbox_key) = ''
+            ''').fetchall()
+            if missing_key_rows:
+                conn.executemany('''
+                    UPDATE mailboxes SET mailbox_key = ? WHERE id = ?
+                ''', [
+                    (str(uuid.uuid4()), row['id'])
+                    for row in missing_key_rows
+                ])
+
             # 检查并添加白名单启用字段（如果不存在）
             try:
                 conn.execute('ALTER TABLE mailboxes ADD COLUMN whitelist_enabled BOOLEAN DEFAULT 0')
@@ -331,7 +344,7 @@ class DatabaseManager:
                 SELECT id, address, created_at, expires_at, retention_days, is_active,
                        sender_whitelist, whitelist_enabled, created_by_ip, access_token,
                        mailbox_key, last_accessed, storage_used, storage_limit
-                FROM mailboxes WHERE address = ? AND is_active = 1
+                FROM mailboxes WHERE address = ?
             ''', (address,))
             row = cursor.fetchone()
             
@@ -345,9 +358,12 @@ class DatabaseManager:
                     'sender_whitelist': json.loads(row['sender_whitelist'] or '[]'),
                     'whitelist_enabled': bool(row['whitelist_enabled']),
                     'access_token': row['access_token'],
+                    'mailbox_key': row['mailbox_key'],
                     'is_active': bool(row['is_active']),
                     'created_by_ip': row['created_by_ip'],
-                    'last_accessed': row['last_accessed']
+                    'last_accessed': row['last_accessed'],
+                    'storage_used': row['storage_used'] or 0,
+                    'storage_limit': row['storage_limit'] or config.MAX_MAILBOX_SIZE_BYTES
                 }
             return None
     
@@ -358,7 +374,7 @@ class DatabaseManager:
                 SELECT id, address, created_at, expires_at, retention_days, is_active,
                        sender_whitelist, whitelist_enabled, created_by_ip, access_token,
                        mailbox_key, last_accessed, storage_used, storage_limit
-                FROM mailboxes WHERE access_token = ? AND is_active = 1
+                FROM mailboxes WHERE access_token = ?
             ''', (access_token,))
             row = cursor.fetchone()
             
@@ -372,9 +388,12 @@ class DatabaseManager:
                     'sender_whitelist': json.loads(row['sender_whitelist'] or '[]'),
                     'whitelist_enabled': bool(row['whitelist_enabled']),
                     'access_token': row['access_token'],
+                    'mailbox_key': row['mailbox_key'],
                     'is_active': bool(row['is_active']),
                     'created_by_ip': row['created_by_ip'],
-                    'last_accessed': row['last_accessed']
+                    'last_accessed': row['last_accessed'],
+                    'storage_used': row['storage_used'] or 0,
+                    'storage_limit': row['storage_limit'] or config.MAX_MAILBOX_SIZE_BYTES
                 }
             return None
     
@@ -408,6 +427,7 @@ class DatabaseManager:
                     'sender_whitelist': json.loads(row['sender_whitelist'] or '[]'),
                     'whitelist_enabled': bool(row['whitelist_enabled']),
                     'access_token': row['access_token'],
+                    'mailbox_key': row['mailbox_key'],
                     'is_active': bool(row['is_active']),
                     'created_by_ip': row['created_by_ip'],
                     'last_accessed': row['last_accessed'],
@@ -987,6 +1007,7 @@ class DatabaseManager:
                     'sender_whitelist': json.loads(row['sender_whitelist'] or '[]'),
                     'whitelist_enabled': bool(row.get('whitelist_enabled', 0)),
                     'access_token': row['access_token'],
+                    'mailbox_key': row['mailbox_key'],
                     'is_active': bool(row['is_active'])
                 })
 

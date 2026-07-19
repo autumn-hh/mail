@@ -18,7 +18,8 @@ USE_DATABASE = os.getenv("USE_DATABASE", "true").lower() == "true"
 
 PROTECTED_ADDRESSES = os.getenv("PROTECTED_ADDRESSES", "^admin.*")
 
-PASSWORD = os.getenv("PASSWORD", "password")
+# 管理密码缺失时必须拒绝认证，避免部署遗漏 .env 后落入公开默认口令。
+PASSWORD = os.getenv("PASSWORD", "").strip()
 
 # 支持多域名配置
 DOMAINS_STR = os.getenv("DOMAINS", os.getenv("DOMAIN", "localhost"))
