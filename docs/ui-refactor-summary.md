@@ -79,11 +79,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 | --- | --- |
 | Python compileall | 通过 |
 | 全部 JavaScript `node --check` | 通过 |
-| pytest | `23 passed, 126 subtests passed` |
+| pytest | `26 passed, 133 subtests passed` |
 | Docker Compose 配置 | 通过 |
 | Docker 镜像构建 | 在目标服务器通过 |
 | 桌面与移动端浏览器验收 | 通过，无横向溢出或控制台错误 |
-| 移动端 Lighthouse | Accessibility / Best Practices / SEO / Agentic Browsing 均为 `100` |
+| 本地移动端 Lighthouse | Accessibility / Best Practices / SEO / Agentic Browsing 均为 `100` |
 
 ### 生产部署验证
 
@@ -91,7 +91,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 - Compose 服务 `tempmail` 已进入 `healthy`，Web 映射到 `8081`，SMTP 映射到 `25`；
 - `/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
 - 旧 `/mailbox?address=...&token=...` 与不含 `----` 的 `/web/...` 均返回 `404`；
-- 管理员认证、凭据页禁止缓存响应头与 SMTP `220` 握手均已通过在线检查。
+- 管理员认证、凭据页禁止缓存响应头与 SMTP 投递到收件箱的端到端链路均已通过在线检查；测试邮箱及邮件已清理。
+- 容器健康检查不保存 HTML 响应体；生产 `.env` 与邮件数据目录分别使用 `600` 与 `700` 权限。
 
 ## 6. 部署步骤
 

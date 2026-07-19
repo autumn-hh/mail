@@ -8,6 +8,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import quote
 
 
@@ -248,6 +249,93 @@ class PublicMailboxBackendTest(unittest.TestCase):
         )
         self.assertEqual(admin_created.status_code, 200, admin_created.get_data(as_text=True))
         self.assertTrue(admin_created.get_json()['data'].get('mailbox_key'))
+
+    def test_admin_create_mailbox_rejects_non_object_and_non_string_address(self):
+        headers = {'Authorization': f'Bearer {config.PASSWORD}'}
+
+        # 合法 JSON 不等于合法对象；数组、标量和 null 都必须稳定返回 400。
+        for payload in ([], 'invalid', 42, None):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    '/api/admin/mailboxes',
+                    headers=headers,
+                    json=payload,
+                )
+                self.assertEqual(
+                    response.status_code,
+                    400,
+                    response.get_data(as_text=True),
+                )
+                self.assertFalse(response.get_json()['success'])
+
+        non_string_address = self.client.post(
+            '/api/admin/mailboxes',
+            headers=headers,
+            json={'address': 42, 'retention_days': 7},
+        )
+        self.assertEqual(non_string_address.status_code, 400)
+        self.assertEqual(non_string_address.get_json()['error'], '邮箱地址格式不正确')
+
+    def test_admin_create_mailbox_returns_persisted_allowed_domains(self):
+        address = f'domains{uuid.uuid4().hex[:8]}@example.com'
+        allowed_domains = ['example.com', 'example.net']
+        response = self.client.post(
+            '/api/admin/mailboxes',
+            headers={'Authorization': f'Bearer {config.PASSWORD}'},
+            json={
+                'address': address,
+                'retention_days': 7,
+                'allowed_domains': allowed_domains,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(
+            response.get_json()['data']['allowed_domains'],
+            allowed_domains,
+        )
+        with db_manager.get_connection() as conn:
+            row = conn.execute(
+                'SELECT allowed_domains FROM mailboxes WHERE address = ?',
+                (address,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row['allowed_domains'], '["example.com", "example.net"]')
+
+    def test_get_mailbox_info_normalizes_json_sender_whitelist(self):
+        mailbox = {
+            'id': 'mailbox-id',
+            'address': 'normalized@example.com',
+            'created_at': 1,
+            'expires_at': 2,
+            'retention_days': 7,
+            'whitelist_enabled': True,
+            'access_token': 'access-token',
+            'mailbox_key': 'mailbox-key',
+            'is_active': True,
+        }
+        stats = {
+            'total_emails': 0,
+            'unread_emails': 0,
+            'last_email_time': None,
+        }
+
+        with patch.object(db_inbox_handler, 'db_manager') as manager:
+            manager.get_mailbox_stats.return_value = stats
+            manager.is_mailbox_expired.return_value = False
+            cases = (
+                ('["sender@example.net"]', ['sender@example.net']),
+                ('not-json', []),
+                ('{"sender": "example.net"}', []),
+            )
+            for raw_value, expected in cases:
+                with self.subTest(raw_value=raw_value):
+                    manager.get_mailbox_by_address.return_value = {
+                        **mailbox,
+                        'sender_whitelist': raw_value,
+                    }
+                    info = db_inbox_handler.get_mailbox_info(mailbox['address'])
+                    self.assertEqual(info['sender_whitelist'], expected)
 
     def test_admin_authentication_fails_closed_and_ignores_spoofed_forwarded_ip(self):
         original_password = config.PASSWORD

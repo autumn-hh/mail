@@ -29,7 +29,8 @@ LOCAL_PART_PATTERN = re.compile(r'^[a-zA-Z0-9]{3,20}$')
 
 def validate_local_part(address: Optional[str]) -> Tuple[bool, Optional[str]]:
     """校验邮箱 local-part，防止绕过前端校验"""
-    if not address or '@' not in address:
+    # 请求体来自外部，先约束类型，避免非字符串 address 触发 TypeError 并返回 500。
+    if not isinstance(address, str) or not address or '@' not in address:
         return False, '邮箱地址格式不正确'
 
     local_part = address.split('@', 1)[0]
@@ -131,7 +132,14 @@ def create_mailbox():
         return jsonify({'success': False, 'error': error_msg or '未授权'}), 401
 
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True)
+        # 仅接受 JSON 对象，避免数组等合法 JSON 值进入字段读取逻辑后触发 500。
+        if not isinstance(data, dict):
+            return jsonify({
+                'success': False,
+                'error': '无效的请求体格式，必须为 JSON 对象'
+            }), 400
+
         address = data.get('address')
         retention_days_raw = data.get('retention_days')
         sender_whitelist = data.get('sender_whitelist', [])
@@ -172,6 +180,8 @@ def create_mailbox():
                     UPDATE mailboxes SET allowed_domains = ? WHERE id = ?
                 ''', (json.dumps(allowed_domains), mailbox['id']))
                 conn.commit()
+            # 数据库写入后同步响应对象，避免客户端拿到缺失或过期的域名列表。
+            mailbox['allowed_domains'] = allowed_domains
 
         if success:
             return jsonify({

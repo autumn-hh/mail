@@ -184,13 +184,23 @@ def get_mailbox_info(address: str) -> Optional[Dict]:
     # 获取统计信息
     stats = db_manager.get_mailbox_stats(mailbox['id'])
 
+    sender_whitelist = mailbox.get('sender_whitelist', [])
+    if isinstance(sender_whitelist, str):
+        # 兼容返回 SQLite 原始 JSON 字符串的适配器，保证调用方始终收到列表。
+        try:
+            sender_whitelist = json.loads(sender_whitelist or '[]')
+        except (json.JSONDecodeError, TypeError):
+            sender_whitelist = []
+    if not isinstance(sender_whitelist, list):
+        sender_whitelist = []
+
     return {
         'id': mailbox['id'],
         'address': mailbox['address'],
         'created_at': mailbox['created_at'],
         'expires_at': mailbox['expires_at'],
         'retention_days': mailbox['retention_days'],
-        'sender_whitelist': mailbox['sender_whitelist'],
+        'sender_whitelist': sender_whitelist,
         'whitelist_enabled': mailbox.get('whitelist_enabled', False),
         'access_token': mailbox['access_token'],
         'mailbox_key': mailbox.get('mailbox_key'),
