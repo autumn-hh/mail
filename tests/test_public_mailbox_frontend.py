@@ -55,18 +55,32 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
                 self.assertNotIn(forbidden, sources)
 
     def test_neumorphic_tokens_and_responsive_rules_exist(self):
+        # 核心令牌集中到共享基础，避免页面继续复制同一组主题变量。
+        foundation = read('src/frontend/static/styles/ui_foundation.css').lower()
+        for token in (
+            '--bg-start: #eef3f1',
+            '--bg-end: #e5edea',
+            '--surface: #edf2f0',
+            '--primary: #2f746d',
+            '--shadow-raised:',
+            '--shadow-inset:',
+            '--ease: 180ms',
+        ):
+            self.assertIn(token, foundation)
+
+        self.assertIn(':focus-visible', foundation)
+        self.assertIn('prefers-reduced-motion: reduce', foundation)
+        self.assertIn('max-width: 768px', foundation)
+        self.assertIn('max-width: 480px', foundation)
+
         for stylesheet in (
             'src/frontend/static/styles/mailbox_login.css',
             'src/frontend/static/styles/mailbox_manager.css',
         ):
             css = read(stylesheet).lower()
             with self.subTest(stylesheet=stylesheet):
-                self.assertIn('--bg-start: #eef3f1', css)
-                self.assertIn('--bg-end: #e5edea', css)
-                self.assertIn('--surface: #edf2f0', css)
-                self.assertIn('--primary: #2f746d', css)
-                self.assertIn('180ms', css)
-                self.assertIn('prefers-reduced-motion: reduce', css)
+                self.assertIn('var(--surface)', css)
+                self.assertIn('var(--ease)', css)
 
         manager_css = read('src/frontend/static/styles/mailbox_manager.css')
         for breakpoint in ('max-width: 900px', 'max-width: 720px', 'max-width: 520px'):

@@ -1,97 +1,195 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <meta name="robots" content="noindex,nofollow">
-    <title>只读 API 调试台 - Maildrop</title>
+    <meta name="referrer" content="no-referrer">
+    <!-- 即使禁止索引，也向辅助技术说明该工具仅提供只读调试。 -->
+    <meta name="description" content="Maildrop 只读 API 调试台，用于安全检查邮箱信息与收件箱响应。">
+    <title>只读 API 调试台 · Maildrop</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/favicon.svg') }}">
+    <!-- 共享设计令牌先加载，页面 CSS 只负责调试台布局。 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles/ui_foundation.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles/api_test.css') }}">
 </head>
-<body>
-    <main class="debug-shell">
-        <header class="topbar">
-            <div>
-                <p class="eyebrow">Maildrop</p>
-                <h1>只读 API 调试台</h1>
-                <p class="intro">用邮箱地址和密钥完成鉴权，仅查询邮箱信息与收件箱。</p>
+<body class="api-debug-page">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <header class="page-topbar" aria-label="页面导航">
+        <a class="brand-link" href="/" aria-label="返回 Maildrop 公开入口">
+            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#code"></use></svg>
+            <span>Maildrop API</span>
+        </a>
+        <nav class="top-actions" aria-label="快捷入口">
+            <button class="soft-button soft-button-quiet" id="security-dialog-open" type="button" data-dialog-open="security-dialog">
+                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#shield"></use></svg>
+                <span>安全说明</span>
+            </button>
+            <a class="soft-button soft-button-quiet" href="/">公开入口</a>
+            <a class="soft-button soft-button-quiet" href="/admin">管理后台</a>
+            <button class="icon-button" id="theme-toggle" type="button" aria-label="切换明暗主题" title="切换主题">
+                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#sun"></use></svg>
+            </button>
+        </nav>
+    </header>
+
+    <main class="debug-shell" id="main-content">
+        <section class="debug-hero soft-panel" aria-labelledby="page-title">
+            <div class="hero-copy">
+                <p class="eyebrow">READ-ONLY WORKBENCH</p>
+                <h1 id="page-title">只读 API 调试台</h1>
+                <p class="intro">用邮箱地址与密钥换取临时 Bearer 令牌，再查询邮箱信息或收件箱。页面不会创建、修改、删除或发送任何数据。</p>
             </div>
-            <nav class="top-actions" aria-label="页面导航">
-                <a class="button button-secondary" href="/">公开入口</a>
-                <a class="button button-secondary" href="/admin">管理后台</a>
-            </nav>
-        </header>
-
-        <section class="panel" aria-labelledby="auth-title">
-            <div class="panel-heading">
-                <div>
-                    <p class="step-label">步骤 1</p>
-                    <h2 id="auth-title">邮箱鉴权</h2>
-                </div>
-                <p class="panel-hint">密钥与访问令牌只保存在当前页面内存，刷新后自动清除。</p>
-            </div>
-
-            <form id="auth-form" autocomplete="off" novalidate>
-                <div class="form-grid">
-                    <label class="field" for="mailbox-address">
-                        <span>邮箱地址</span>
-                        <input
-                            id="mailbox-address"
-                            name="address"
-                            type="email"
-                            autocomplete="off"
-                            placeholder="user@example.com"
-                            required
-                        >
-                    </label>
-                    <label class="field" for="mailbox-key">
-                        <span>邮箱密钥</span>
-                        <input
-                            id="mailbox-key"
-                            name="mailbox_key"
-                            type="password"
-                            autocomplete="off"
-                            placeholder="输入 mailbox_key"
-                            spellcheck="false"
-                            required
-                        >
-                    </label>
-                </div>
-
-                <div class="button-row">
-                    <button id="auth-button" class="button button-primary" type="submit">获取访问令牌</button>
-                    <button id="clear-session-button" class="button button-secondary" type="button">清空会话</button>
-                </div>
-                <p id="auth-status" class="status" data-kind="idle" role="status" aria-live="polite">尚未鉴权</p>
-            </form>
-        </section>
-
-        <section class="panel" aria-labelledby="request-title">
-            <div class="panel-heading">
-                <div>
-                    <p class="step-label">步骤 2</p>
-                    <h2 id="request-title">只读请求</h2>
-                </div>
-                <p class="panel-hint">请求自动附带当前内存中的 Bearer 令牌。</p>
-            </div>
-
-            <div class="button-row">
-                <button id="mailbox-info-button" class="button button-primary" type="button" disabled>查询邮箱信息</button>
-                <button id="inbox-button" class="button button-primary" type="button" disabled>查询收件箱</button>
+            <div class="hero-facts" aria-label="安全特性">
+                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#database"></use></svg>只读请求</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#lock"></use></svg>凭据仅内存</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#code"></use></svg>文本化输出</span>
             </div>
         </section>
 
-        <section class="panel console-panel" aria-labelledby="output-title">
-            <div class="console-heading">
-                <div>
-                    <p class="step-label">响应</p>
-                    <h2 id="output-title">JSON 输出</h2>
+        <div class="workflow-grid">
+            <section class="panel auth-panel soft-panel" aria-labelledby="auth-title">
+                <div class="panel-heading">
+                    <div class="heading-main">
+                        <span class="step-index">01</span>
+                        <div>
+                            <p class="step-label">步骤 1</p>
+                            <h2 id="auth-title">邮箱鉴权</h2>
+                        </div>
+                    </div>
+                    <span class="method-badge">POST</span>
                 </div>
-                <button id="clear-output-button" class="button button-quiet" type="button">清空输出</button>
-            </div>
-            <pre id="api-output" tabindex="0" aria-live="polite">等待请求...</pre>
-        </section>
+                <p class="panel-hint">密钥和访问令牌只保存在当前页面内存，刷新或清空会话后立即消失。</p>
+
+                <form id="auth-form" autocomplete="off" novalidate>
+                    <div class="form-grid">
+                        <label class="field" for="mailbox-address">
+                            <span>邮箱地址</span>
+                            <span class="input-shell">
+                                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#mail"></use></svg>
+                                <input
+                                    id="mailbox-address"
+                                    name="address"
+                                    type="email"
+                                    autocomplete="off"
+                                    placeholder="user@example.com"
+                                    spellcheck="false"
+                                    required
+                                >
+                            </span>
+                        </label>
+                        <label class="field" for="mailbox-key">
+                            <span>邮箱密钥</span>
+                            <span class="input-shell">
+                                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#key"></use></svg>
+                                <input
+                                    id="mailbox-key"
+                                    name="mailbox_key"
+                                    type="password"
+                                    autocomplete="off"
+                                    placeholder="输入 mailbox_key"
+                                    spellcheck="false"
+                                    required
+                                >
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="button-row">
+                        <button id="auth-button" class="soft-button soft-button-primary" type="submit">
+                            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#lock"></use></svg>
+                            获取访问令牌
+                        </button>
+                        <button id="clear-session-button" class="soft-button soft-button-secondary" type="button">
+                            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#close"></use></svg>
+                            清空会话
+                        </button>
+                    </div>
+                    <p id="auth-status" class="status" data-kind="idle" role="status" aria-live="polite">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span data-role="message">尚未鉴权</span>
+                    </p>
+                </form>
+            </section>
+
+            <section class="panel request-panel soft-panel" aria-labelledby="request-title">
+                <div class="panel-heading">
+                    <div class="heading-main">
+                        <span class="step-index">02</span>
+                        <div>
+                            <p class="step-label">步骤 2</p>
+                            <h2 id="request-title">选择只读请求</h2>
+                        </div>
+                    </div>
+                    <span class="method-badge method-get">GET</span>
+                </div>
+                <p class="panel-hint">请求会自动附带内存中的 Bearer 令牌，不会把令牌写入查询参数。</p>
+
+                <div class="request-options">
+                    <button id="mailbox-info-button" class="request-card" type="button" disabled>
+                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#info"></use></svg></span>
+                        <span><strong>查询邮箱信息</strong><small>/api/mailbox_info_v2</small></span>
+                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#arrow-right"></use></svg>
+                    </button>
+                    <button id="inbox-button" class="request-card" type="button" disabled>
+                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#inbox"></use></svg></span>
+                        <span><strong>查询收件箱</strong><small>/api/get_inbox</small></span>
+                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#arrow-right"></use></svg>
+                    </button>
+                </div>
+            </section>
+
+            <section class="panel console-panel soft-panel" aria-labelledby="output-title">
+                <div class="console-heading">
+                    <div class="heading-main">
+                        <span class="step-index">03</span>
+                        <div>
+                            <p class="step-label">步骤 3</p>
+                            <h2 id="output-title">查看 JSON 响应</h2>
+                        </div>
+                    </div>
+                    <button id="clear-output-button" class="soft-button soft-button-quiet" type="button">
+                        <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#trash"></use></svg>
+                        清空输出
+                    </button>
+                </div>
+                <div class="console-toolbar" aria-hidden="true">
+                    <span class="console-dot dot-danger"></span>
+                    <span class="console-dot dot-warning"></span>
+                    <span class="console-dot dot-success"></span>
+                    <span class="console-label">response.json</span>
+                </div>
+                <pre id="api-output" tabindex="0" aria-live="polite">等待请求...</pre>
+            </section>
+        </div>
     </main>
 
+    <dialog class="app-dialog ui-dialog" id="security-dialog" aria-labelledby="security-title">
+        <div class="dialog-card">
+            <button class="dialog-close icon-button" id="security-dialog-close" type="button" data-dialog-close="security-dialog" aria-label="关闭安全说明">
+                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#close"></use></svg>
+            </button>
+            <div class="dialog-icon" aria-hidden="true">
+                <svg class="ui-icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#shield"></use></svg>
+            </div>
+            <p class="eyebrow">SECURITY BOUNDARY</p>
+            <h2 id="security-title">调试台安全边界</h2>
+            <ul class="security-list">
+                <li><strong>仅三步：</strong>密钥换令牌、邮箱信息查询、收件箱查询。</li>
+                <li><strong>仅内存：</strong>地址与访问令牌不会写入 localStorage、sessionStorage 或 URL。</li>
+                <li><strong>仅文本：</strong>响应统一写入 <code>&lt;pre&gt;.textContent</code>，邮件 HTML 不进入页面 DOM。</li>
+                <li><strong>不回显令牌：</strong>鉴权成功输出会主动移除 access_token。</li>
+            </ul>
+            <div class="dialog-actions">
+                <button class="soft-button soft-button-primary" type="button" data-dialog-close="security-dialog">我知道了</button>
+            </div>
+        </div>
+    </dialog>
+
+    <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
+    <script src="{{ url_for('static', filename='scripts/ui_components.js') }}"></script>
     <script src="{{ url_for('static', filename='scripts/api_test.js') }}"></script>
 </body>
 </html>

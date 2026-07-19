@@ -1,6 +1,12 @@
 // 邮箱管理系统 - 前端逻辑
 
 // 统一转义所有写入 HTML 模板的外部数据，避免数据库/API 字段形成存储型 XSS。
+// 动态模板统一复用本地图标，既移除第三方字体请求，也避免各视图重复 SVG 标记。
+function uiIcon(name, className = '') {
+    if (!window.MaildropUI || typeof window.MaildropUI.icon !== 'function') return '';
+    return window.MaildropUI.icon(name, className);
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -96,6 +102,12 @@ class AdminMailboxManager {
                 const view = e.currentTarget.dataset.view;
                 if (view) {
                     this.switchView(view);
+                }
+            });
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    item.click();
                 }
             });
         });
@@ -385,8 +397,8 @@ class AdminMailboxManager {
 
         if (submitBtn) {
             submitBtn.innerHTML = this.registerMode === 'batch'
-                ? '<i class="fas fa-layer-group"></i><span>批量创建</span>'
-                : '<i class="fas fa-plus"></i><span>创建邮箱</span>';
+                ? `${uiIcon('layer-group')}<span>批量创建</span>`
+                : `${uiIcon('plus')}<span>创建邮箱</span>`;
         }
     }
 
@@ -430,10 +442,8 @@ class AdminMailboxManager {
         }
 
         if (submitBtn) {
-            submitBtn.disabled = isSubmitting;
-            if (isSubmitting) {
-                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>创建中...</span>';
-            } else {
+            window.MaildropUI.setBusy(submitBtn, isSubmitting, isSubmitting ? '创建中...' : '');
+            if (!isSubmitting) {
                 this.applyRegisterModeToUi(this.registerMode);
             }
         }
@@ -576,7 +586,7 @@ class AdminMailboxManager {
             result.style.display = 'block';
             result.innerHTML = `
                 <div class="success-message">
-                    <i class="fas fa-check-circle"></i>
+                    ${uiIcon('check-circle')}
                     <h3>邮箱创建成功！</h3>
                 </div>
                 <div class="mailbox-info">
@@ -590,11 +600,11 @@ class AdminMailboxManager {
                         <div class="token-box">
                             <code>${escapeHtml(mailbox.mailbox_key)}</code>
                             <button class="btn btn-sm btn-secondary" type="button" data-action="copy-key">
-                                <i class="fas fa-copy"></i> 复制
+                                ${uiIcon('copy')} 复制
                             </button>
                         </div>
                         <div class="warning-alert">
-                            <i class="fas fa-exclamation-triangle"></i>
+                            ${uiIcon('warning')}
                             <span>密钥会包含在访问地址中，请按登录凭据妥善保管。</span>
                         </div>
                     </div>
@@ -611,7 +621,7 @@ class AdminMailboxManager {
                                 ${escapeHtml(accessUrl)}
                             </a>
                             <button class="btn btn-sm btn-secondary" type="button" data-action="copy-link">
-                                <i class="fas fa-copy"></i> 复制链接
+                                ${uiIcon('copy')} 复制链接
                             </button>
                         </div>
                     </div>
@@ -619,15 +629,15 @@ class AdminMailboxManager {
                 
                 <div class="result-actions">
                     <button class="btn btn-success" type="button" data-action="open-mailbox">
-                        <i class="fas fa-external-link-alt"></i>
+                        ${uiIcon('external-link')}
                         打开邮箱
                     </button>
                     <button class="btn btn-primary" type="button" data-action="continue-register">
-                        <i class="fas fa-plus"></i>
+                        ${uiIcon('plus')}
                         继续创建
                     </button>
                     <button class="btn btn-secondary" type="button" data-action="view-mailboxes">
-                        <i class="fas fa-list"></i>
+                        ${uiIcon('list')}
                         查看邮箱列表
                     </button>
                 </div>
@@ -707,7 +717,7 @@ class AdminMailboxManager {
                 result.style.display = 'block';
                 result.innerHTML = `
                     <div class="success-message">
-                        <i class="fas fa-check-circle"></i>
+                        ${uiIcon('check-circle')}
                         <h3>批量创建完成</h3>
                     </div>
 
@@ -749,11 +759,11 @@ class AdminMailboxManager {
 
                     <div class="result-actions">
                         <button class="btn btn-primary" type="button" data-action="continue-register">
-                            <i class="fas fa-plus"></i>
+                            ${uiIcon('plus')}
                             继续创建
                         </button>
                         <button class="btn btn-secondary" type="button" data-action="view-mailboxes">
-                            <i class="fas fa-list"></i>
+                            ${uiIcon('list')}
                             查看邮箱列表
                         </button>
                     </div>
@@ -809,7 +819,7 @@ class AdminMailboxManager {
     
     async loadMailboxes() {
         const tbody = document.getElementById('mailbox-list');
-        tbody.innerHTML = '<tr><td colspan="9" class="loading-row"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="9" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
 
         try {
             const params = new URLSearchParams({
@@ -845,10 +855,10 @@ class AdminMailboxManager {
 
         // 创建来源标签配置
         const sourceLabels = {
-            'admin': { text: '管理员', class: 'source-admin', icon: 'fa-user-shield' },
-            'register': { text: '注册', class: 'source-register', icon: 'fa-user-plus' },
-            'api_v2': { text: 'API', class: 'source-api', icon: 'fa-code' },
-            'unknown': { text: '未知', class: 'source-unknown', icon: 'fa-question' }
+            'admin': { text: '管理员', class: 'source-admin', icon: 'user-shield' },
+            'register': { text: '注册', class: 'source-register', icon: 'user-plus' },
+            'api_v2': { text: 'API', class: 'source-api', icon: 'code' },
+            'unknown': { text: '未知', class: 'source-unknown', icon: 'question' }
         };
 
         tbody.innerHTML = rows.map((mailbox, index) => {
@@ -866,13 +876,13 @@ class AdminMailboxManager {
                     <td data-label="邮箱地址">
                         <div class="mailbox-address">
                             <span class="mailbox-address-text" title="${escapeHtml(mailbox.address)}">${escapeHtml(mailbox.address)}</span>
-                            ${mailbox.whitelist_enabled ? '<i class="fas fa-shield-alt" title="已启用白名单"></i>' : ''}
+                            ${mailbox.whitelist_enabled ? `<span class="mailbox-shield-indicator" title="已启用白名单" aria-label="已启用白名单">${uiIcon('shield', 'mailbox-shield-icon')}</span>` : ''}
                         </div>
                     </td>
                     <td data-label="状态"><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td data-label="创建来源">
                         <span class="source-badge ${sourceConfig.class}">
-                            <i class="fas ${sourceConfig.icon}"></i>
+                            ${uiIcon(sourceConfig.icon)}
                             ${sourceConfig.text}
                         </span>
                     </td>
@@ -882,14 +892,14 @@ class AdminMailboxManager {
                     <td data-label="未读">${escapeHtml(safeNumber(mailbox.unread_count))}</td>
                     <td class="actions-cell">
                         <div class="action-buttons">
-                            <button class="btn-icon" type="button" data-action="view" data-mailbox-index="${index}" title="查看详情">
-                                <i class="fas fa-eye"></i>
+                            <button class="btn-icon" type="button" data-action="view" data-mailbox-index="${index}" title="查看详情" aria-label="查看详情">
+                                ${uiIcon('eye')}
                             </button>
-                            <button class="btn-icon" type="button" data-action="edit" data-mailbox-index="${index}" title="编辑">
-                                <i class="fas fa-edit"></i>
+                            <button class="btn-icon" type="button" data-action="edit" data-mailbox-index="${index}" title="编辑" aria-label="编辑">
+                                ${uiIcon('edit')}
                             </button>
-                            <button class="btn-icon btn-danger" type="button" data-action="delete" data-mailbox-index="${index}" title="删除">
-                                <i class="fas fa-trash"></i>
+                            <button class="btn-icon btn-danger" type="button" data-action="delete" data-mailbox-index="${index}" title="删除" aria-label="删除">
+                                ${uiIcon('trash')}
                             </button>
                         </div>
                     </td>
@@ -935,7 +945,7 @@ class AdminMailboxManager {
         
         // 上一页
         if (page > 1) {
-            html += `<button class="btn btn-sm" type="button" data-page="${page - 1}"><i class="fas fa-chevron-left"></i></button>`;
+            html += `<button class="btn btn-sm" type="button" data-page="${page - 1}" title="上一页" aria-label="上一页">${uiIcon('chevron-left')}</button>`;
         }
         
         // 页码
@@ -949,7 +959,7 @@ class AdminMailboxManager {
         
         // 下一页
         if (page < totalPages) {
-            html += `<button class="btn btn-sm" type="button" data-page="${page + 1}"><i class="fas fa-chevron-right"></i></button>`;
+            html += `<button class="btn btn-sm" type="button" data-page="${page + 1}" title="下一页" aria-label="下一页">${uiIcon('chevron-right')}</button>`;
         }
         
         html += '</div>';
@@ -987,27 +997,9 @@ class AdminMailboxManager {
     }
     
     showToast(type, message) {
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
         const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
-        toast.className = `toast toast-${safeType}`;
-
-        const icon = document.createElement('i');
-        icon.className = `fas fa-${safeType === 'success' ? 'check-circle' : 'exclamation-circle'}`;
-        const text = document.createElement('span');
-        // API 错误信息可能包含外部输入，必须作为纯文本展示。
-        text.textContent = String(message ?? '');
-        toast.append(icon, text);
-        container.appendChild(toast);
-        
-        setTimeout(() => {
-            toast.classList.add('show');
-        }, 10);
-        
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        // API 错误信息由共享 Toast 以 textContent 写入，避免外部输入进入 HTML。
+        return window.MaildropUI.toast(String(message ?? ''), safeType);
     }
 }
 
@@ -1067,12 +1059,12 @@ function showTokenModal(mailbox) {
                     <p><strong>访问令牌（请妥善保存，仅显示一次）：</strong></p>
                     <div class="token-box">
                         <code data-role="access-token"></code>
-                        <button class="btn-icon" type="button" data-action="copy-token" title="复制">
-                            <i class="fas fa-copy"></i>
+                        <button class="btn-icon" type="button" data-action="copy-token" title="复制" aria-label="复制">
+                            ${uiIcon('copy')}
                         </button>
                     </div>
                     <p class="warning-text">
-                        <i class="fas fa-exclamation-triangle"></i>
+                        ${uiIcon('warning')}
                         此令牌仅显示一次，请立即复制保存！
                     </p>
                 </div>
@@ -1125,19 +1117,19 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
         modal.innerHTML = `
             <div class="modal-content modal-large">
                 <div class="modal-header">
-                    <h3><i class="fas fa-inbox"></i> 邮箱详情</h3>
-                    <button class="modal-close" type="button" data-action="close">
-                        <i class="fas fa-times"></i>
+                    <h3>${uiIcon('inbox')} 邮箱详情</h3>
+                    <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                        ${uiIcon('close')}
                     </button>
                 </div>
                 <div class="modal-body">
                     <div class="detail-grid">
                         <div class="detail-item full-width">
-                            <label><i class="fas fa-at"></i> 邮箱地址</label>
+                            <label>${uiIcon('at')} 邮箱地址</label>
                             <div class="address-value">${escapeHtml(mailbox.address)}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-info-circle"></i> 状态</label>
+                            <label>${uiIcon('info')} 状态</label>
                             <div>
                                 <span class="status-badge ${mailbox.is_expired ? 'expired' : (mailbox.is_active ? 'active' : 'disabled')}">
                                     ${mailbox.is_expired ? '已过期' : (mailbox.is_active ? '活跃' : '已禁用')}
@@ -1145,23 +1137,23 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-calendar-plus"></i> 创建时间</label>
+                            <label>${uiIcon('calendar-plus')} 创建时间</label>
                             <div>${escapeHtml(this.formatDate(mailbox.created_at))}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-hourglass-end"></i> 过期时间</label>
+                            <label>${uiIcon('hourglass-end')} 过期时间</label>
                             <div>${escapeHtml(this.formatDate(mailbox.expires_at))}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-stopwatch"></i> 保留天数</label>
+                            <label>${uiIcon('stopwatch')} 保留天数</label>
                             <div>${escapeHtml(safeNumber(mailbox.retention_days))} 天</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-envelope"></i> 邮件统计</label>
+                            <label>${uiIcon('mail')} 邮件统计</label>
                             <div>总计 ${escapeHtml(safeNumber(mailbox.email_count))} 封，未读 ${escapeHtml(safeNumber(mailbox.unread_count))} 封</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-hdd"></i> 存储容量</label>
+                            <label>${uiIcon('storage')} 存储容量</label>
                             <div>
                                 <div class="storage-info">
                                     <div class="storage-bar">
@@ -1175,64 +1167,64 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-shield-alt"></i> 白名单状态</label>
+                            <label>${uiIcon('shield')} 白名单状态</label>
                             <div>${mailbox.whitelist_enabled ? '已启用' : '未启用'}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label><i class="fas fa-list-alt"></i> 发件人白名单</label>
+                            <label>${uiIcon('list-alt')} 发件人白名单</label>
                             <div>${escapeHtml(senderWhitelist.length > 0 ? senderWhitelist.join(', ') : '无')}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label><i class="fas fa-globe"></i> 允许的域名</label>
+                            <label>${uiIcon('globe')} 允许的域名</label>
                             <div>${escapeHtml(allowedDomains.length > 0 ? allowedDomains.join(', ') : '无限制')}</div>
                         </div>
                         <div class="detail-item full-width">
-                            <label><i class="fas fa-key"></i> 访问令牌 (Access Token)</label>
+                            <label>${uiIcon('key')} 访问令牌 (Access Token)</label>
                             <div class="token-display-inline">
                                 <code>${escapeHtml(mailbox.access_token)}</code>
-                                <button class="btn-icon" type="button" data-action="copy-token" title="复制">
-                                    <i class="fas fa-copy"></i>
+                                <button class="btn-icon" type="button" data-action="copy-token" title="复制" aria-label="复制">
+                                    ${uiIcon('copy')}
                                 </button>
                             </div>
                         </div>
                         <div class="detail-item full-width">
-                            <label><i class="fas fa-lock"></i> 邮箱密钥 (Mailbox Key)</label>
+                            <label>${uiIcon('lock')} 邮箱密钥 (Mailbox Key)</label>
                             <div class="token-display-inline">
                                 <code>${escapeHtml(mailbox.mailbox_key)}</code>
-                                <button class="btn-icon" type="button" data-action="copy-key" title="复制">
-                                    <i class="fas fa-copy"></i>
+                                <button class="btn-icon" type="button" data-action="copy-key" title="复制" aria-label="复制">
+                                    ${uiIcon('copy')}
                                 </button>
                             </div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-network-wired"></i> 创建IP</label>
+                            <label>${uiIcon('network')} 创建IP</label>
                             <div>${escapeHtml(mailbox.created_by_ip || '-')}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-history"></i> 最后访问</label>
+                            <label>${uiIcon('history')} 最后访问</label>
                             <div>${escapeHtml(this.formatDate(mailbox.last_accessed))}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-user-shield"></i> 最后更新管理员</label>
+                            <label>${uiIcon('user-shield')} 最后更新管理员</label>
                             <div>${escapeHtml(mailbox.updated_by_admin || '-')}</div>
                         </div>
                         <div class="detail-item">
-                            <label><i class="fas fa-pen-square"></i> 最后更新时间</label>
+                            <label>${uiIcon('pen')} 最后更新时间</label>
                             <div>${escapeHtml(this.formatDate(mailbox.updated_at))}</div>
                         </div>
                         <div class="detail-item full-width quick-access-box">
                             <div class="quick-access-label">
-                                <i class="fas fa-link"></i>
+                                ${uiIcon('link')}
                                 🎯 快速访问链接
                             </div>
                             <div class="quick-access-content">
                                 <div class="quick-access-url">${escapeHtml(accessUrl)}</div>
                                 <div class="quick-access-actions">
                                     <button class="btn btn-sm btn-secondary" type="button" data-action="copy-link" title="复制链接">
-                                        <i class="fas fa-copy"></i> 复制
+                                        ${uiIcon('copy')} 复制
                                     </button>
                                     <a data-role="access-link" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary">
-                                        <i class="fas fa-external-link-alt"></i> 打开
+                                        ${uiIcon('external-link')} 打开
                                     </a>
                                 </div>
                             </div>
@@ -1242,16 +1234,16 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
                 <div class="modal-footer">
                     <button class="btn btn-secondary" type="button" data-action="close">关闭</button>
                     <button class="btn btn-warning" type="button" data-action="reset-token">
-                        <i class="fas fa-key"></i>
+                        ${uiIcon('key')}
                         重置令牌
                     </button>
                     <button class="btn btn-primary" type="button" data-action="edit">
-                        <i class="fas fa-edit"></i>
+                        ${uiIcon('edit')}
                         编辑
                     </button>
                     ${!mailbox.is_active ?
                         `<button class="btn btn-success" type="button" data-action="enable">
-                            <i class="fas fa-undo"></i>
+                            ${uiIcon('undo')}
                             恢复邮箱
                         </button>` : ''
                     }
@@ -1305,8 +1297,8 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
             <div class="modal-content">
                 <div class="modal-header">
                     <h3>编辑邮箱</h3>
-                    <button class="modal-close" type="button" data-action="close">
-                        <i class="fas fa-times"></i>
+                    <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                        ${uiIcon('close')}
                     </button>
                 </div>
                 <div class="modal-body">
@@ -1344,7 +1336,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
                 <div class="modal-footer">
                     <button class="btn btn-secondary" type="button" data-action="close">取消</button>
                     <button class="btn btn-primary" type="button" data-action="save">
-                        <i class="fas fa-save"></i>
+                        ${uiIcon('save')}
                         保存
                     </button>
                 </div>
@@ -1424,14 +1416,14 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
         <div class="modal-content">
             <div class="modal-header">
                 <h3>确认删除</h3>
-                <button class="modal-close" type="button" data-action="close">
-                    <i class="fas fa-times"></i>
+                <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                    ${uiIcon('close')}
                 </button>
             </div>
             <div class="modal-body">
                 <p>确定要删除此邮箱吗？</p>
                 <div class="alert alert-warning">
-                    <i class="fas fa-info-circle"></i>
+                    ${uiIcon('info')}
                     <div>
                         <strong>软删除说明：</strong>
                         <ul style="margin: 8px 0 0 20px; padding: 0;">
@@ -1446,7 +1438,7 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
             <div class="modal-footer">
                 <button class="btn btn-secondary" type="button" data-action="close">取消</button>
                 <button class="btn btn-danger" type="button" data-action="confirm">
-                    <i class="fas fa-trash"></i>
+                    ${uiIcon('trash')}
                     确认删除
                 </button>
             </div>
@@ -1481,7 +1473,7 @@ AdminMailboxManager.prototype.confirmDeleteMailbox = async function(mailboxId, m
 
 AdminMailboxManager.prototype.loadAuditLogs = async function() {
     const tbody = document.getElementById('audit-log-list');
-    tbody.innerHTML = '<tr><td colspan="6" class="loading-row"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="6" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
 
     try {
         const response = await this.apiRequest('/api/admin/audit-logs?limit=100');
@@ -1501,8 +1493,8 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
                 <td data-label="IP地址">${escapeHtml(log.ip_address || '-')}</td>
                 <td class="actions-cell">
                     <div class="action-buttons">
-                        <button class="btn-icon" type="button" data-log-index="${index}" title="查看详情">
-                            <i class="fas fa-info-circle"></i>
+                        <button class="btn-icon" type="button" data-log-index="${index}" title="查看详情" aria-label="查看审计详情">
+                            ${uiIcon('info')}
                         </button>
                     </div>
                 </td>
@@ -1529,35 +1521,35 @@ AdminMailboxManager.prototype.showAuditDetail = function(log) {
     modal.innerHTML = `
         <div class="modal-content">
                 <div class="modal-header">
-                    <h3><i class="fas fa-info-circle"></i> 审计日志详情</h3>
-                    <button class="modal-close" type="button" data-action="close">
-                    <i class="fas fa-times"></i>
+                    <h3>${uiIcon('info')} 审计日志详情</h3>
+                    <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                    ${uiIcon('close')}
                 </button>
             </div>
             <div class="modal-body">
                 <div class="detail-grid">
                     <div class="detail-item">
-                        <label><i class="fas fa-clock"></i> 时间</label>
+                        <label>${uiIcon('clock')} 时间</label>
                         <div>${escapeHtml(this.formatDate(log.timestamp))}</div>
                     </div>
                     <div class="detail-item">
-                        <label><i class="fas fa-tag"></i> 操作</label>
+                        <label>${uiIcon('tag')} 操作</label>
                         <div><span class="action-badge action-${safeCssToken(log.action)}">${escapeHtml(log.action || '-')}</span></div>
                     </div>
                     <div class="detail-item">
-                        <label><i class="fas fa-inbox"></i> 邮箱ID</label>
+                        <label>${uiIcon('inbox')} 邮箱ID</label>
                         <div><code>${escapeHtml(log.mailbox_id || '-')}</code></div>
                     </div>
                     <div class="detail-item">
-                        <label><i class="fas fa-user-shield"></i> 管理员</label>
+                        <label>${uiIcon('user-shield')} 管理员</label>
                         <div>${escapeHtml(log.admin_user || '-')}</div>
                     </div>
                     <div class="detail-item">
-                        <label><i class="fas fa-network-wired"></i> IP地址</label>
+                        <label>${uiIcon('network')} IP地址</label>
                         <div>${escapeHtml(log.ip_address || '-')}</div>
                     </div>
                     <div class="detail-item full-width">
-                        <label><i class="fas fa-file-code"></i> 变更内容</label>
+                        <label>${uiIcon('file-code')} 变更内容</label>
                         <pre class="audit-log-content json-viewer" data-role="changes"></pre>
                     </div>
                 </div>
@@ -1624,14 +1616,14 @@ async function batchDeleteMailboxes() {
         <div class="modal-content">
             <div class="modal-header">
                 <h3>确认批量删除</h3>
-                <button class="modal-close" type="button" data-action="close">
-                    <i class="fas fa-times"></i>
+                <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                    ${uiIcon('close')}
                 </button>
             </div>
             <div class="modal-body">
                 <p>确定要删除选中的 <strong>${mailboxIds.length}</strong> 个邮箱吗？</p>
                 <div class="alert alert-warning">
-                    <i class="fas fa-info-circle"></i>
+                    ${uiIcon('info')}
                     <div>
                         <strong>软删除说明：</strong>
                         <ul style="margin: 8px 0 0 20px; padding: 0;">
@@ -1646,7 +1638,7 @@ async function batchDeleteMailboxes() {
             <div class="modal-footer">
                 <button class="btn btn-secondary" type="button" data-action="close">取消</button>
                 <button class="btn btn-danger" id="confirm-batch-delete-btn">
-                    <i class="fas fa-trash"></i>
+                    ${uiIcon('trash')}
                     确认删除
                 </button>
             </div>
@@ -1702,14 +1694,14 @@ async function resetMailboxToken(mailboxId) {
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3><i class="fas fa-key"></i> 新的访问令牌</h3>
-                    <button class="close-btn" type="button" data-action="close">
-                        <i class="fas fa-times"></i>
+                    <h3>${uiIcon('key')} 新的访问令牌</h3>
+                    <button class="close-btn" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                        ${uiIcon('close')}
                     </button>
                 </div>
                 <div class="modal-body">
                     <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle"></i>
+                        ${uiIcon('warning')}
                         请妥善保存新令牌，关闭后将无法再次查看！
                     </div>
                     <div class="form-group">
@@ -1717,7 +1709,7 @@ async function resetMailboxToken(mailboxId) {
                         <div style="display: flex; gap: 8px;">
                             <input type="text" data-role="new-token" readonly style="flex: 1;">
                             <button class="btn btn-primary" type="button" data-action="copy-token">
-                                <i class="fas fa-copy"></i> 复制
+                                ${uiIcon('copy')} 复制
                             </button>
                         </div>
                     </div>
@@ -1771,7 +1763,7 @@ async function refreshSecurityInfo() {
 // 加载被封禁的IP列表
 async function loadBlockedIPs() {
     const tbody = document.getElementById('blocked-ips-list');
-    tbody.innerHTML = '<tr><td colspan="3" class="loading-row"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="3" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
 
     try {
         const response = await adminManager.apiRequest('/api/admin/blocked-ips');
@@ -1788,7 +1780,7 @@ async function loadBlockedIPs() {
                 <td>${escapeHtml(formatSeconds(safeNumber(item.remaining_seconds)))}</td>
                 <td>
                     <button class="btn btn-sm btn-warning" type="button" data-ip-index="${index}">
-                        <i class="fas fa-unlock"></i>
+                        ${uiIcon('unlock')}
                         解除封禁
                     </button>
                 </td>
@@ -1827,7 +1819,7 @@ async function unblockIP(ip) {
 // 加载创建来源统计
 async function loadSourceStats() {
     const grid = document.getElementById('source-stats-grid');
-    grid.innerHTML = '<div class="stat-card"><div class="stat-icon"><i class="fas fa-spinner fa-spin"></i></div><div class="stat-info"><div class="stat-label">加载中...</div><div class="stat-value">-</div></div></div>';
+    grid.innerHTML = `<div class="stat-card"><div class="stat-icon">${uiIcon('spinner', 'is-spinning')}</div><div class="stat-info"><div class="stat-label">加载中...</div><div class="stat-value">-</div></div></div>`;
 
     try {
         const response = await adminManager.apiRequest('/api/admin/source-stats');
@@ -1837,22 +1829,22 @@ async function loadSourceStats() {
         const sourceConfig = {
             'admin': {
                 label: '管理员创建',
-                icon: 'fa-user-shield',
+                icon: 'user-shield',
                 gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
             },
             'register': {
                 label: '用户注册',
-                icon: 'fa-user-plus',
+                icon: 'user-plus',
                 gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
             },
             'api_v2': {
                 label: 'API创建',
-                icon: 'fa-code',
+                icon: 'code',
                 gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
             },
             'unknown': {
                 label: '未知来源',
-                icon: 'fa-question',
+                icon: 'question',
                 gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
             }
         };
@@ -1868,7 +1860,7 @@ async function loadSourceStats() {
             html += `
                 <div class="stat-card">
                     <div class="stat-icon" style="background: ${config.gradient};">
-                        <i class="fas ${config.icon}"></i>
+                        ${uiIcon(config.icon)}
                     </div>
                     <div class="stat-info">
                         <div class="stat-label">${config.label}</div>
@@ -1882,7 +1874,7 @@ async function loadSourceStats() {
         html += `
             <div class="stat-card">
                 <div class="stat-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                    <i class="fas fa-inbox"></i>
+                    ${uiIcon('inbox')}
                 </div>
                 <div class="stat-info">
                     <div class="stat-label">总邮箱数</div>
@@ -1893,7 +1885,7 @@ async function loadSourceStats() {
 
         grid.innerHTML = html;
     } catch (error) {
-        grid.innerHTML = '<div class="stat-card"><div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-info"><div class="stat-label">加载失败</div><div class="stat-value">-</div></div></div>';
+        grid.innerHTML = `<div class="stat-card"><div class="stat-icon">${uiIcon('warning')}</div><div class="stat-info"><div class="stat-label">加载失败</div><div class="stat-value">-</div></div></div>`;
         adminManager.showToast('error', '加载统计信息失败');
     }
 }
@@ -1992,7 +1984,7 @@ function displaySubAdmins(subAdmins) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="empty-cell">
-                    <i class="fas fa-inbox"></i>
+                    ${uiIcon('inbox')}
                     <p>暂无子管理员</p>
                 </td>
             </tr>
@@ -2029,11 +2021,11 @@ function displaySubAdmins(subAdmins) {
                 <td data-label="备注">${escapeHtml(admin.notes || '-')}</td>
                 <td class="actions-cell">
                     <div class="action-buttons">
-                        <button class="btn-icon" type="button" data-action="edit" data-admin-index="${index}">
-                            <i class="fas fa-edit"></i>
+                        <button class="btn-icon" type="button" data-action="edit" data-admin-index="${index}" title="编辑" aria-label="编辑">
+                            ${uiIcon('edit')}
                         </button>
-                        <button class="btn-icon btn-danger" type="button" data-action="delete" data-admin-index="${index}">
-                            <i class="fas fa-trash"></i>
+                        <button class="btn-icon btn-danger" type="button" data-action="delete" data-admin-index="${index}" title="删除" aria-label="删除">
+                            ${uiIcon('trash')}
                         </button>
                     </div>
                 </td>
@@ -2069,7 +2061,7 @@ async function showCreateSubAdminModal() {
     // 加载可用域名
     await loadDomainsForSubAdmin();
 
-    document.getElementById('sub-admin-modal').style.display = 'flex';
+    window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'));
 }
 
 // 编辑子管理员
@@ -2101,7 +2093,7 @@ async function editSubAdmin(subAdminId) {
             // 加载可用域名并选中已分配的域名
             await loadDomainsForSubAdmin(admin.domains);
 
-            document.getElementById('sub-admin-modal').style.display = 'flex';
+            window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'));
         }
     } catch (error) {
         console.error('加载子管理员信息失败:', error);
@@ -2146,7 +2138,7 @@ async function loadDomainsForSubAdmin(selectedDomains = []) {
 
 // 关闭子管理员模态框
 function closeSubAdminModal() {
-    document.getElementById('sub-admin-modal').style.display = 'none';
+    window.MaildropUI.closeDialog(document.getElementById('sub-admin-modal'));
 }
 
 // 保存子管理员

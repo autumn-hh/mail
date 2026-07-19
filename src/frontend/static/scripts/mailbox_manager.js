@@ -1,8 +1,6 @@
 'use strict';
 
 const SESSION_TOKEN_KEY = 'maildrop_access_token';
-const THEME_KEY = 'maildrop_theme';
-const THEMES = ['auto', 'light', 'dark'];
 const POLL_INTERVAL_MS = 30_000;
 
 const state = {
@@ -32,7 +30,6 @@ document.addEventListener('DOMContentLoaded', initializeMailbox);
 
 async function initializeMailbox() {
     bindInterfaceEvents();
-    applyTheme(readTheme());
 
     try {
         const credential = parseCredentialPath();
@@ -119,7 +116,6 @@ function bindInterfaceEvents() {
     document.getElementById('refresh-button').addEventListener('click', refreshAll);
     document.getElementById('copy-address').addEventListener('click', copyAddress);
     document.getElementById('copy-address-secondary').addEventListener('click', copyAddress);
-    document.getElementById('theme-toggle').addEventListener('click', cycleTheme);
     document.getElementById('mark-all-read').addEventListener('click', markAllRead);
     document.getElementById('delete-selected').addEventListener('click', deleteSelectedEmails);
     document.getElementById('detail-back').addEventListener('click', returnFromDetail);
@@ -395,7 +391,7 @@ function createIcon(name) {
     const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     svg.setAttribute('class', 'icon');
     svg.setAttribute('aria-hidden', 'true');
-    use.setAttribute('href', `#icon-${name}`);
+    use.setAttribute('href', `${document.documentElement.dataset.iconSprite}#${name}`);
     svg.appendChild(use);
     return svg;
 }
@@ -540,7 +536,7 @@ async function markAllRead() {
 
 async function deleteOneEmail(id) {
     const email = state.emails.find((item) => String(item.id) === String(id));
-    if (!email || !window.confirm(`确定删除“${email.Subject || '无主题'}”吗？此操作无法撤销。`)) {
+    if (!email || !await requestConfirmation(`确定删除“${email.Subject || '无主题'}”吗？此操作无法撤销。`)) {
         return;
     }
 
@@ -558,7 +554,7 @@ async function deleteOneEmail(id) {
 
 async function deleteSelectedEmails() {
     const ids = Array.from(state.selectedIds);
-    if (!ids.length || !window.confirm(`确定删除选中的 ${ids.length} 封邮件吗？此操作无法撤销。`)) {
+    if (!ids.length || !await requestConfirmation(`确定删除选中的 ${ids.length} 封邮件吗？此操作无法撤销。`)) {
         return;
     }
 
@@ -572,6 +568,40 @@ async function deleteSelectedEmails() {
     } catch (error) {
         handleRequestError(error, '批量删除失败。');
     }
+}
+
+function requestConfirmation(message) {
+    const dialog = document.getElementById('confirm-dialog');
+    const messageNode = document.getElementById('confirm-message');
+    const acceptButton = document.getElementById('confirm-accept');
+    const cancelButton = document.getElementById('confirm-cancel');
+
+    messageNode.textContent = message;
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (accepted) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            acceptButton.removeEventListener('click', accept);
+            cancelButton.removeEventListener('click', cancel);
+            dialog.removeEventListener('cancel', cancelNative);
+            MaildropUI.closeDialog(dialog);
+            resolve(accepted);
+        };
+        const accept = () => finish(true);
+        const cancel = () => finish(false);
+        const cancelNative = (event) => {
+            event.preventDefault();
+            finish(false);
+        };
+
+        acceptButton.addEventListener('click', accept);
+        cancelButton.addEventListener('click', cancel);
+        dialog.addEventListener('cancel', cancelNative);
+        MaildropUI.openDialog(dialog);
+    });
 }
 
 function removeEmailsLocally(ids) {
@@ -825,28 +855,6 @@ function isValidMailboxKey(value) {
     return /^[A-Za-z0-9._~-]{6,128}$/.test(value);
 }
 
-function readTheme() {
-    const saved = sessionStorage.getItem(THEME_KEY);
-    return THEMES.includes(saved) ? saved : 'auto';
-}
-
-function cycleTheme() {
-    const current = document.documentElement.dataset.theme || 'auto';
-    const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
-    sessionStorage.setItem(THEME_KEY, next);
-    applyTheme(next);
-}
-
-function applyTheme(theme) {
-    const labels = { auto: '跟随系统', light: '浅色', dark: '深色' };
-    const button = document.getElementById('theme-toggle');
-    document.documentElement.dataset.theme = theme;
-    if (button) {
-        button.setAttribute('aria-label', `主题：${labels[theme]}`);
-        button.title = `当前主题：${labels[theme]}，点击切换`;
-    }
-}
-
 function handleRequestError(error, fallback) {
     if (error instanceof ApiError && [401, 403, 410, 423].includes(error.status)) {
         window.clearInterval(state.pollTimer);
@@ -857,13 +865,7 @@ function handleRequestError(error, fallback) {
 }
 
 function showToast(message, type = 'info') {
-    const region = document.getElementById('toast-region');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
-    toast.textContent = message;
-    region.appendChild(toast);
-    window.setTimeout(() => toast.remove(), 3600);
+    MaildropUI.toast(message, type);
 }
 
 function normalizeDate(value, fallback) {
