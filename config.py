@@ -5,6 +5,8 @@ load_dotenv()
 
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
+# 仅在确认入口经过固定反向代理时启用；默认不信任客户端可伪造的转发头。
+TRUST_PROXY_HOPS = max(0, int(os.getenv("TRUST_PROXY_HOPS", 0)))
 
 SMTP_HOST = os.getenv("SMTP_HOST", "0.0.0.0")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 25))  # 使用非特权端口

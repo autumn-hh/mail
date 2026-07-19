@@ -96,9 +96,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 
 ## 6. 部署步骤
 
-1. 准备 `.env`，仅在部署环境配置域名、管理密码、数据库路径和网络策略；不要把 `.env` 或数据文件提交到版本库。使用同机 HTTPS 反向代理时设置 `WEB_BIND_HOST=127.0.0.1`，防止公网通过 `8081` 绕过 TLS。
+1. 准备 `.env`，仅在部署环境配置域名、管理密码、数据库路径和网络策略；不要把 `.env` 或数据文件提交到版本库。使用同机单层 HTTPS 反向代理时设置 `WEB_BIND_HOST=127.0.0.1` 和 `TRUST_PROXY_HOPS=1`，防止公网通过 `8081` 绕过 TLS，并只信任这一跳写入的客户端 IP；无受信代理时保持 `TRUST_PROXY_HOPS=0`。
 2. 执行不带 `-Build` 的验证脚本，先确认源码、测试和 Compose 配置有效。
 3. 执行带 `-Build` 的验证脚本，或单独运行 `docker compose build`。
 4. 使用 `docker compose up -d` 启动服务。
 5. 验证 `/`、`/web`、有效凭据链接、`/admin`、`/register` 和 `/api-test`，并确认旧页面与测试发信接口返回 `404`。
-6. 将反向代理上游指向 `127.0.0.1:8081`，检查日志脱敏、HTTPS、缓存策略和可信代理源 IP 配置，并确认公网无法直连 `8081` 后再开放访问。
+6. 将宿主机或 host-network 反向代理上游指向 `127.0.0.1:8081`，检查其覆盖 `X-Forwarded-For`、日志脱敏、HSTS 与缓存策略，并确认应用记录真实客户端 IP、公网无法直连 `8081` 后再开放访问。bridge 网络中的代理应改用受控共享网络，不可照搬 loopback 上游。
