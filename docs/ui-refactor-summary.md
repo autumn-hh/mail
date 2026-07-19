@@ -87,12 +87,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 
 ### 生产部署验证
 
-- 部署目录：`/root/maildrop-master`；生产 `.env` 仅存在于服务器且权限为 `600`；
-- Compose 服务 `tempmail` 已进入 `healthy`，Web 映射到 `8081`，SMTP 映射到 `25`；
+- 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；部署提交：`8271de6365fe0e93254aed260e54048ba79ac121`；
+- 生产 `.env` 仅存在于服务器且权限为 `600`；Compose 服务 `tempmail` 为 `healthy`，Web 仅绑定 `127.0.0.1:8081`，SMTP 保持公网 `25`；
+- OpenResty 上游使用 `127.0.0.1:8081`，HTTPS 响应包含 HSTS，证书私钥权限已收紧为 `600`，公网无法直连 `8081`；
 - `/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
 - 旧 `/mailbox?address=...&token=...` 与不含 `----` 的 `/web/...` 均返回 `404`；
-- 管理员认证、凭据页禁止缓存响应头与 SMTP 投递到收件箱的端到端链路均已通过在线检查；测试邮箱及邮件已清理。
-- 容器健康检查不保存 HTML 响应体；生产 `.env` 与邮件数据目录分别使用 `600` 与 `700` 权限。
+- 管理员认证、真实客户端 IP、凭据页禁止缓存响应头与 SMTP 投递到收件箱的端到端链路均已通过在线检查；测试邮箱、邮件和对应审计记录已精确清理；
+- 数据库 `quick_check=ok`，部署前后保持 `137` 个邮箱、`49` 封邮件、`863` 条审计日志和 `2` 个子管理员；既有 `726` 条孤立审计日志外键问题未在本次 UI 部署中改写；
+- 容器健康检查不保存 HTML 响应体；邮件数据目录权限为 `700`；回滚备份位于 `/root/maildrop-master-backups/20260719-231731-before-8271de6`。
 
 ## 6. 部署步骤
 
