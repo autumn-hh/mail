@@ -510,8 +510,6 @@
 }
 
 dialog.app-dialog {
-    width: min(620px, calc(100vw - 28px));
-    max-height: min(86vh, 720px);
     padding: 0;
     overflow: auto;
     border: 1px solid var(--border-strong);
@@ -528,7 +526,8 @@ dialog.app-dialog::backdrop {
 
 .dialog-card {
     position: relative;
-    padding: clamp(28px, 6vw, 44px);
+    /* 安全说明内容较短，收紧留白可避免说明弹窗显得笨重。 */
+    padding: clamp(22px, 4vw, 30px);
 }
 
 .dialog-close {

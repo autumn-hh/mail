@@ -1087,7 +1087,7 @@ input[type="radio"] {
     box-shadow: var(--shadow-inset);
 }
 
-/* 注册、安全与设置页面复用同一种大卡片，不再各自维护渐变。 */
+/* 邮箱创建、安全与设置页面复用同一种大卡片，不再各自维护渐变。 */
 .register-content {
     width: min(100%, 860px);
     margin: 0 auto;
@@ -1151,6 +1151,65 @@ input[type="radio"] {
     margin-top: 18px;
 }
 
+/* 预览用内凹表面弱化视觉层级，让管理员先核对地址再执行批量创建。 */
+.batch-preview {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    box-shadow: var(--shadow-inset);
+}
+
+.batch-preview-header,
+.batch-progress-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.batch-preview-header label,
+.batch-preview-header small {
+    margin: 0;
+}
+
+.batch-preview-list {
+    display: grid;
+    gap: 8px;
+    padding-left: 24px;
+    margin: 12px 0 0;
+}
+
+.batch-preview-list li {
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    overflow-wrap: anywhere;
+}
+
+.batch-preview-list .batch-preview-empty {
+    color: var(--text-muted);
+    font-family: inherit;
+}
+
+.batch-progress {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    margin-bottom: 16px;
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+    border-radius: var(--radius-md);
+    background: var(--primary-soft);
+}
+
+.batch-progress progress {
+    width: 100%;
+    height: 10px;
+    accent-color: var(--primary-strong);
+}
+
 .success-message {
     display: grid;
     justify-items: center;
@@ -1172,6 +1231,19 @@ input[type="radio"] {
     margin: 0;
 }
 
+/* 批量部分失败和全部失败使用对应状态色，防止管理员把失败结果误判为成功。 */
+.batch-completion-message.warning {
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+    color: var(--warning);
+    background: var(--warning-soft);
+}
+
+.batch-completion-message.error {
+    border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+
 .mailbox-info,
 .batch-result-list,
 .quick-access-box {
@@ -1183,6 +1255,19 @@ input[type="radio"] {
     border-radius: var(--radius-lg);
     background: var(--surface-strong);
     box-shadow: var(--shadow-inset);
+}
+
+/* 大批量结果固定在卡片内滚动，避免 100 条结果把页面无限拉长。 */
+.batch-result-list {
+    max-height: 340px;
+    align-content: start;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.batch-completion-text {
+    margin: 0;
+    color: var(--text-muted);
 }
 
 .info-item {
@@ -1332,7 +1417,7 @@ input[type="radio"] {
     background: var(--surface-muted);
 }
 
-/* 模态框兼容原 show 类与共享组件 is-open 类，并统一焦点层级。 */
+/* 模态框保留 show 兼容类，但新交互统一由共享组件的 is-open 管理焦点。 */
 .modal {
     position: fixed;
     inset: 0;
@@ -1352,8 +1437,9 @@ input[type="radio"] {
 }
 
 .modal-content {
-    width: min(100%, 640px);
-    max-height: min(90vh, 880px);
+    width: min(100%, 560px);
+    max-height: min(84vh, 720px);
+    max-height: min(84dvh, 720px);
     overflow-y: auto;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-xl);
@@ -1363,15 +1449,31 @@ input[type="radio"] {
     animation: admin-dialog-in var(--ease) both;
 }
 
+/* 根据内容密度分档，短确认不再继承表单或详情的大尺寸。 */
+.modal-content--compact {
+    width: min(100%, 420px);
+    max-height: min(76vh, 560px);
+    max-height: min(76dvh, 560px);
+}
+
+.modal-content--medium {
+    width: min(100%, 560px);
+    max-height: min(84vh, 720px);
+    max-height: min(84dvh, 720px);
+}
+
+.modal-content--wide,
 .modal-content.modal-large {
-    width: min(100%, 900px);
+    width: min(100%, 760px);
+    max-height: min(88vh, 800px);
+    max-height: min(88dvh, 800px);
 }
 
 .modal-header,
 .modal-body,
 .modal-footer,
 .modal-content > form {
-    padding: 20px clamp(18px, 3vw, 26px);
+    padding: 18px clamp(18px, 3vw, 22px);
 }
 
 .modal-header {
@@ -1405,6 +1507,12 @@ input[type="radio"] {
 
 .modal-actions {
     margin-top: 22px;
+}
+
+.modal-message {
+    margin: 0;
+    color: var(--text-muted);
+    line-height: 1.65;
 }
 
 .detail-grid {
@@ -1720,6 +1828,12 @@ code {
         grid-template-columns: 1fr;
     }
 
+    .batch-preview-header,
+    .batch-progress-copy {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .at-symbol {
         display: none;
     }
@@ -1746,15 +1860,29 @@ code {
     }
 
     .modal {
-        align-items: flex-end;
-        padding: 0;
+        align-items: center;
+        padding: 12px;
     }
 
     .modal-content,
+    .modal-content--compact,
+    .modal-content--medium,
+    .modal-content--wide,
     .modal-content.modal-large {
-        width: 100%;
-        max-height: 94vh;
-        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        width: calc(100vw - 24px);
+        max-height: 88vh;
+        max-height: 88dvh;
+        border-radius: var(--radius-xl);
+    }
+
+    /* 短确认保留并排操作，避免两个按钮纵向堆叠后反而拉高弹窗。 */
+    .modal-content--compact .modal-footer {
+        flex-direction: row;
+    }
+
+    .modal-content--compact .modal-footer .btn {
+        flex: 1;
+        width: auto;
     }
 
     .toast-container,

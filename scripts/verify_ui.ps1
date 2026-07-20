@@ -59,6 +59,13 @@ try {
         python -m pytest -q
     }
 
+    # 仓库内执行时同时检查补丁空白，避免混合修改在提交阶段才暴露格式问题。
+    if (Test-Path -LiteralPath (Join-Path $repoRoot '.git')) {
+        Invoke-CheckedStep '检查 Git 差异空白' {
+            git diff --check
+        }
+    }
+
     # Compose 声明了必需的 .env；仓库无生产配置时仅创建本次校验使用的无敏感占位文件。
     if (-not (Test-Path -LiteralPath $temporaryEnvPath)) {
         [System.IO.File]::WriteAllLines($temporaryEnvPath, @(
@@ -83,7 +90,7 @@ try {
         }
     }
 
-    Write-Host "`nUI 重构验证全部通过。" -ForegroundColor Green
+    Write-Host "`n邮箱创建与 UI 重构验证全部通过。" -ForegroundColor Green
 }
 finally {
     Pop-Location

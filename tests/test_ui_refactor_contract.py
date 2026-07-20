@@ -203,6 +203,73 @@ class UiRefactorContractTest(unittest.TestCase):
             with self.subTest(forbidden_word=forbidden_word):
                 self.assertIsNone(re.search(rf'\b{forbidden_word}\b', ui_sources, flags=re.IGNORECASE))
 
+    def test_dialog_sizes_and_focus_behavior_are_consistent(self):
+        foundation = read('src/frontend/static/styles/ui_foundation.css')
+        for modifier, width in (
+            ('ui-dialog--compact', '420px'),
+            ('ui-dialog--medium', '560px'),
+            ('ui-dialog--wide', '760px'),
+        ):
+            with self.subTest(modifier=modifier):
+                self.assertRegex(
+                    foundation,
+                    rf'dialog\.ui-dialog\.{modifier}\s*\{{[\s\S]*?width:\s*min\({width}',
+                )
+
+        register_html = read('src/frontend/templates/register.html')
+        api_html = read('src/frontend/templates/api_test.html')
+        mailbox_html = read('src/frontend/templates/mailbox_manager.html')
+        admin_html = read('src/frontend/templates/admin_mailbox.html')
+        self.assertGreaterEqual(register_html.count('ui-dialog--medium'), 2)
+        self.assertIn('ui-dialog--medium', api_html)
+        self.assertIn('ui-dialog--compact', mailbox_html)
+        self.assertIn('modal-content--medium', admin_html)
+
+        admin_script = read('src/frontend/static/scripts/admin_mailbox.js')
+        admin_css = read('src/frontend/static/styles/admin_mailbox.css')
+        components = read('src/frontend/static/scripts/ui_components.js')
+        self.assertIsNone(re.search(r'\bconfirm\s*\(', admin_script))
+        self.assertIn('function confirmAdminAction(', admin_script)
+        self.assertIn('openAdminModal(modal', admin_script)
+        self.assertIn('closeAndRemoveAdminModal(modal)', admin_script)
+        for modifier in (
+            'modal-content--compact',
+            'modal-content--medium',
+            'modal-content--wide',
+        ):
+            with self.subTest(admin_modifier=modifier):
+                self.assertIn(modifier, admin_css)
+                self.assertIn(modifier, admin_script)
+
+        # 非原生管理弹窗必须支持 Escape，并仍通过关闭按钮完成清理。
+        self.assertIn("event.key === 'Escape'", components)
+        self.assertIn("closeControl.click()", components)
+        self.assertIn("aria-labelledby", components)
+        self.assertIn("[data-dialog-description]", components)
+        self.assertIn("aria-describedby", components)
+        self.assertIn("data-dialog-description", admin_script)
+
+    def test_shared_toasts_are_content_sized_and_compact(self):
+        foundation = read('src/frontend/static/styles/ui_foundation.css')
+
+        # 操作反馈应按内容收缩，避免短文本提示占据大块页面空间。
+        self.assertRegex(
+            foundation,
+            r'\.toast,\s*\.ui-toast\s*\{[^}]*justify-self:\s*end;'
+            r'[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(320px, 100%\);'
+            r'[^}]*min-height:\s*40px;[^}]*padding:\s*6px 10px;',
+        )
+        self.assertRegex(
+            foundation,
+            r'\.ui-toast-close\s*\{[^}]*width:\s*32px;'
+            r'[^}]*min-height:\s*32px;',
+        )
+        self.assertRegex(
+            foundation,
+            r'\.ui-toast-message\s*\{[^}]*min-width:\s*0;'
+            r'[^}]*overflow-wrap:\s*anywhere;',
+        )
+
     def test_only_strict_credential_route_is_generated(self):
         pages = read('src/backend/routes/pages.py')
         routes = re.findall(r'@bp\.route\(["\']([^"\']+)["\']', pages)

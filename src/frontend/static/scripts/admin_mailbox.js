@@ -28,6 +28,65 @@ function safeNumber(value, fallback = 0) {
     return Number.isFinite(number) ? number : fallback;
 }
 
+function openAdminModal(modal, opener = document.activeElement) {
+    if (!(modal instanceof HTMLElement)) return false;
+    if (!modal.isConnected) document.body.appendChild(modal);
+    // 动态后台弹窗统一交给共享组件管理焦点，避免键盘焦点留在遮罩层后方。
+    return window.MaildropUI.openDialog(modal, opener);
+}
+
+function closeAndRemoveAdminModal(modal) {
+    if (!(modal instanceof HTMLElement)) return;
+    window.MaildropUI.closeDialog(modal);
+    modal.remove();
+}
+
+function confirmAdminAction({
+    title = '确认操作',
+    message,
+    confirmLabel = '确认',
+    danger = false,
+    opener = document.activeElement,
+}) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content modal-content--compact">
+                <div class="modal-header">
+                    <h3>${uiIcon(danger ? 'warning' : 'question')} ${escapeHtml(title)}</h3>
+                    <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                        ${uiIcon('close')}
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-message" data-role="message" data-dialog-description></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" type="button" data-action="close">取消</button>
+                    <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" type="button" data-action="confirm">
+                        ${escapeHtml(confirmLabel)}
+                    </button>
+                </div>
+            </div>
+        `;
+        // 提示文本只能写入 textContent，避免 IP、Token 等动态字段形成 HTML。
+        modal.querySelector('[data-role="message"]').textContent = String(message || '');
+        let settled = false;
+        const finish = (accepted) => {
+            if (settled) return;
+            settled = true;
+            closeAndRemoveAdminModal(modal);
+            resolve(accepted);
+        };
+        modal.querySelectorAll('[data-action="close"]').forEach((button) => {
+            button.addEventListener('click', () => finish(false));
+        });
+        modal.querySelector('[data-action="confirm"]').addEventListener('click', () => finish(true));
+        openAdminModal(modal, opener);
+    });
+}
+
 class AdminMailboxManager {
     constructor() {
         // 管理员凭据仅保留在当前标签会话，避免共享设备长期残留。
@@ -40,9 +99,13 @@ class AdminMailboxManager {
         this.currentSource = 'all';
         this.searchQuery = '';
 
-        // 注册视图状态
+        // 邮箱创建视图沿用 register 内部标识，只调整用户可见语义。
         this.registerMode = 'single';
+        this.batchStrategy = 'random';
         this.isRegistering = false;
+        this.availableDomains = [];
+        this.batchAddresses = [];
+        this.batchPlanSignature = '';
 
         this.init();
     }
@@ -139,7 +202,7 @@ class AdminMailboxManager {
             });
         }
 
-        // 注册表单
+        // 邮箱创建表单
         const registerForm = document.getElementById('admin-register-form');
         if (registerForm) {
             registerForm.addEventListener('submit', (e) => {
@@ -169,6 +232,23 @@ class AdminMailboxManager {
             const selectedMode = (selectedInput && selectedInput.value) ? selectedInput.value : 'single';
             this.applyRegisterModeToUi(selectedMode);
         }
+
+        const strategyInputs = document.querySelectorAll('input[name="reg-batch-strategy"]');
+        strategyInputs.forEach(input => {
+            input.addEventListener('change', () => {
+                this.batchStrategy = this.getSelectedBatchStrategy();
+                this.applyRegisterModeToUi(this.getSelectedRegisterMode());
+            });
+        });
+
+        // 输入变化后立即重建预览，确保提交内容与管理员看到的地址一致。
+        ['reg-email-prefix', 'reg-email-domain', 'reg-batch-count'].forEach(id => {
+            const input = document.getElementById(id);
+            if (input) {
+                input.addEventListener('input', () => this.refreshBatchPreview());
+                input.addEventListener('change', () => this.refreshBatchPreview());
+            }
+        });
     }
 
     async generateRandomEmailPrefix() {
@@ -188,6 +268,8 @@ class AdminMailboxManager {
         } else {
             await this.loadAvailableDomains(true);
         }
+
+        this.refreshBatchPreview();
     }
 
     selectRandomDomain() {
@@ -210,10 +292,12 @@ class AdminMailboxManager {
 
     async loadAvailableDomains(randomSelect = false) {
         try {
-            const domains = await this.fetchAvailableDomains();
+            const domains = this.normalizeDomains(await this.fetchAvailableDomains());
             const domainSelect = document.getElementById('reg-email-domain');
 
-            if (domainSelect && domains && domains.length > 0) {
+            this.availableDomains = domains;
+
+            if (domainSelect) {
                 // 清空现有选项
                 domainSelect.innerHTML = '<option value="">选择域名...</option>';
 
@@ -226,11 +310,13 @@ class AdminMailboxManager {
                 });
 
                 // 如果需要随机选择域名
-                if (randomSelect) {
+                if (randomSelect && domains.length > 0) {
                     const randomIndex = Math.floor(Math.random() * domains.length);
                     domainSelect.value = domains[randomIndex];
                 }
             }
+
+            this.refreshBatchPreview();
         } catch (error) {
             console.error('加载域名列表失败:', error);
         }
@@ -338,11 +424,18 @@ class AdminMailboxManager {
             form.style.display = 'block';
         }
 
-        // 默认回到单个创建
+        // 默认回到单个创建；进入批量时使用随机姓名与随机域名方案。
         const singleRadio = document.querySelector('input[name="reg-create-mode"][value="single"]');
         if (singleRadio) {
             singleRadio.checked = true;
         }
+        const randomStrategyRadio = document.querySelector('input[name="reg-batch-strategy"][value="random"]');
+        if (randomStrategyRadio) {
+            randomStrategyRadio.checked = true;
+        }
+        this.batchStrategy = 'random';
+        this.batchAddresses = [];
+        this.batchPlanSignature = '';
 
         const batchCountInput = document.getElementById('reg-batch-count');
         if (batchCountInput) {
@@ -365,6 +458,7 @@ class AdminMailboxManager {
             result.style.display = 'none';
             result.innerHTML = '';
         }
+        this.updateBatchProgress(0, 0, false);
 
         this.applyRegisterModeToUi('single');
         this.loadAvailableDomains(true);
@@ -375,42 +469,140 @@ class AdminMailboxManager {
         return checked && checked.value === 'batch' ? 'batch' : 'single';
     }
 
+    getSelectedBatchStrategy() {
+        const checked = document.querySelector('input[name="reg-batch-strategy"]:checked');
+        return checked && checked.value === 'sequence' ? 'sequence' : 'random';
+    }
+
     applyRegisterModeToUi(mode) {
         this.registerMode = mode === 'batch' ? 'batch' : 'single';
+        this.batchStrategy = this.getSelectedBatchStrategy();
 
         const batchCountGroup = document.getElementById('reg-batch-count-group');
         const batchCountInput = document.getElementById('reg-batch-count');
+        const batchStrategyGroup = document.getElementById('reg-batch-strategy-group');
+        const batchPreviewGroup = document.getElementById('reg-batch-preview-group');
+        const addressGroup = document.getElementById('reg-email-address-group');
+        const addressLabel = document.getElementById('reg-email-address-label');
         const prefixInput = document.getElementById('reg-email-prefix');
+        const domainSelect = document.getElementById('reg-email-domain');
         const registerForm = document.getElementById('admin-register-form');
         const submitBtn = registerForm ? registerForm.querySelector('button[type="submit"]') : null;
+        const isBatch = this.registerMode === 'batch';
+        const needsManualAddress = !isBatch || this.batchStrategy === 'sequence';
 
         if (batchCountGroup) {
-            batchCountGroup.style.display = this.registerMode === 'batch' ? 'block' : 'none';
+            batchCountGroup.style.display = isBatch ? 'block' : 'none';
         }
         if (batchCountInput) {
-            batchCountInput.disabled = this.registerMode !== 'batch';
+            batchCountInput.disabled = !isBatch;
+        }
+        if (batchStrategyGroup) {
+            batchStrategyGroup.hidden = !isBatch;
+        }
+        if (batchPreviewGroup) {
+            batchPreviewGroup.hidden = !isBatch;
+        }
+        if (addressGroup) {
+            addressGroup.hidden = !needsManualAddress;
+        }
+        if (addressLabel) {
+            addressLabel.textContent = isBatch ? '用户名前缀与域名 *' : '邮箱地址 *';
         }
 
         if (prefixInput) {
-            prefixInput.placeholder = this.registerMode === 'batch' ? '用户名前缀（如 abc）' : '用户名（如 alex4821）';
+            prefixInput.disabled = !needsManualAddress;
+            prefixInput.required = needsManualAddress;
+            prefixInput.placeholder = isBatch ? '用户名前缀（如 team）' : '用户名（如 oliviawilson4821）';
+        }
+        if (domainSelect) {
+            domainSelect.disabled = !needsManualAddress;
+            domainSelect.required = needsManualAddress;
         }
 
         if (submitBtn) {
-            submitBtn.innerHTML = this.registerMode === 'batch'
+            submitBtn.innerHTML = isBatch
                 ? `${uiIcon('layer-group')}<span>批量创建</span>`
                 : `${uiIcon('plus')}<span>创建邮箱</span>`;
         }
+
+        this.refreshBatchPreview();
     }
 
     generateRandomUsername() {
-        const names = [
-            'alex', 'emma', 'oliver', 'mia', 'liam', 'sophia',
-            'noah', 'ava', 'jack', 'lily', 'lucas', 'grace',
-            'leo', 'ella', 'henry', 'chloe', 'james', 'zoey'
-        ];
-        const name = names[Math.floor(Math.random() * names.length)];
+        const firstNames = this.getRandomFirstNames();
+        const lastNames = this.getRandomLastNames();
+        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+        const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
         const digits = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `${name}${digits}`;
+        return `${firstName}${lastName}${digits}`;
+    }
+
+    getRandomFirstNames() {
+        return [
+            'alex', 'emma', 'oliver', 'mia', 'liam', 'sophia', 'noah', 'ava',
+            'jack', 'lily', 'lucas', 'grace', 'leo', 'ella', 'henry', 'chloe',
+            'james', 'zoey', 'ethan', 'alice'
+        ];
+    }
+
+    getRandomLastNames() {
+        return [
+            'smith', 'brown', 'davis', 'wilson', 'taylor', 'moore', 'clark',
+            'hall', 'young', 'king', 'wright', 'green', 'baker', 'adams',
+            'scott', 'lewis', 'walker', 'turner', 'hill', 'reed'
+        ];
+    }
+
+    shuffleValues(values) {
+        const shuffled = [...values];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    }
+
+    normalizeDomains(domains) {
+        // API 域名先去空和去重，避免同一域名在轮转中获得额外权重。
+        return [...new Set((Array.isArray(domains) ? domains : [])
+            .map(domain => String(domain ?? '').trim())
+            .filter(Boolean))];
+    }
+
+    generateRandomUsernames(count) {
+        const combinations = [];
+        this.getRandomFirstNames().forEach(firstName => {
+            this.getRandomLastNames().forEach(lastName => {
+                combinations.push(`${firstName}${lastName}`);
+            });
+        });
+
+        // 姓名组合本身不重复，因此即使四位数字碰撞也能保证同批用户名唯一。
+        return this.shuffleValues(combinations).slice(0, count).map(name => {
+            const digits = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+            return `${name}${digits}`;
+        });
+    }
+
+    generateRotatingDomains(domains, count) {
+        const normalized = this.normalizeDomains(domains);
+        const scheduled = [];
+        while (scheduled.length < count && normalized.length > 0) {
+            // 每轮重新洗牌后再依次分配，域名不足时也能均衡复用。
+            for (const domain of this.shuffleValues(normalized)) {
+                scheduled.push(domain);
+                if (scheduled.length === count) break;
+            }
+        }
+        return scheduled;
+    }
+
+    generateRandomBatchAddresses(count, domains) {
+        const usernames = this.generateRandomUsernames(count);
+        const scheduledDomains = this.generateRotatingDomains(domains, count);
+        if (scheduledDomains.length !== count) return [];
+        return usernames.map((username, index) => `${username}@${scheduledDomains[index]}`);
     }
 
     isValidLocalPart(localPart) {
@@ -463,6 +655,91 @@ class AdminMailboxManager {
         return { digits, addresses };
     }
 
+    getBatchPlanSignature() {
+        const count = parseInt(document.getElementById('reg-batch-count')?.value || '0');
+        const prefix = document.getElementById('reg-email-prefix')?.value.trim() || '';
+        const domain = document.getElementById('reg-email-domain')?.value.trim() || '';
+        return JSON.stringify({
+            strategy: this.getSelectedBatchStrategy(),
+            count,
+            prefix,
+            domain,
+            domains: this.normalizeDomains(this.availableDomains)
+        });
+    }
+
+    refreshBatchPreview() {
+        const previewList = document.getElementById('reg-batch-preview-list');
+        if (!previewList || this.getSelectedRegisterMode() !== 'batch') {
+            this.batchAddresses = [];
+            this.batchPlanSignature = '';
+            return;
+        }
+
+        const count = parseInt(document.getElementById('reg-batch-count')?.value || '0');
+        const strategy = this.getSelectedBatchStrategy();
+        const prefix = document.getElementById('reg-email-prefix')?.value.trim() || '';
+        const domain = document.getElementById('reg-email-domain')?.value.trim() || '';
+        let addresses = [];
+        let emptyMessage = '';
+
+        if (!Number.isInteger(count) || count < 2 || count > 100) {
+            emptyMessage = '请输入 2–100 的创建数量';
+        } else if (strategy === 'random') {
+            const domains = this.normalizeDomains(this.availableDomains);
+            if (domains.length === 0) {
+                emptyMessage = '暂无可用域名，无法生成预览';
+            } else {
+                addresses = this.generateRandomBatchAddresses(count, domains);
+            }
+        } else if (!prefix || !domain) {
+            emptyMessage = '填写前缀并选择域名后显示预览';
+        } else if (!/^[a-zA-Z0-9]+$/.test(prefix)) {
+            emptyMessage = '批量前缀仅允许英文和数字';
+        } else {
+            const generated = this.generateBatchAddresses(prefix, domain, count);
+            const localPartLength = prefix.length + generated.digits;
+            if (localPartLength < 3 || localPartLength > 20) {
+                emptyMessage = '前缀加序号后的长度需为 3–20';
+            } else {
+                addresses = generated.addresses;
+            }
+        }
+
+        this.batchAddresses = addresses;
+        this.batchPlanSignature = this.getBatchPlanSignature();
+        previewList.replaceChildren();
+
+        if (addresses.length === 0) {
+            const item = document.createElement('li');
+            item.className = 'batch-preview-empty';
+            item.textContent = emptyMessage || '暂无预览';
+            previewList.appendChild(item);
+            return;
+        }
+
+        addresses.slice(0, 3).forEach(address => {
+            const item = document.createElement('li');
+            item.textContent = address;
+            previewList.appendChild(item);
+        });
+    }
+
+    updateBatchProgress(completed, total, visible = true) {
+        const progress = document.getElementById('reg-batch-progress');
+        const text = document.getElementById('reg-batch-progress-text');
+        const bar = document.getElementById('reg-batch-progress-bar');
+        if (!progress || !text || !bar) return;
+
+        const safeTotal = Math.max(0, Number(total) || 0);
+        const safeCompleted = Math.min(safeTotal, Math.max(0, Number(completed) || 0));
+        progress.hidden = !visible;
+        text.textContent = `已完成 ${safeCompleted}/${safeTotal}`;
+        bar.max = Math.max(1, safeTotal);
+        bar.value = safeCompleted;
+        bar.textContent = `${safeTotal > 0 ? Math.round((safeCompleted / safeTotal) * 100) : 0}%`;
+    }
+
     async createMailboxByAddress({ address, retentionDays, senderWhitelist, allowedDomains, whitelistEnabled }) {
         const requestData = {
             address,
@@ -499,16 +776,11 @@ class AdminMailboxManager {
 
         const mode = this.getSelectedRegisterMode();
         const emailPrefix = document.getElementById('reg-email-prefix').value.trim();
-        const emailDomain = document.getElementById('reg-email-domain').value;
+        const emailDomain = document.getElementById('reg-email-domain').value.trim();
         const retentionDays = parseInt(document.getElementById('reg-retention-days').value);
         const whitelistText = document.getElementById('reg-sender-whitelist').value;
         const allowedDomainsText = document.getElementById('reg-allowed-domains').value;
         const whitelistEnabled = document.getElementById('reg-whitelist-enabled').checked;
-
-        if (!emailPrefix || !emailDomain) {
-            this.showToast('error', '请输入完整的邮箱地址');
-            return;
-        }
 
         // 解析白名单
         const senderWhitelist = whitelistText
@@ -531,25 +803,52 @@ class AdminMailboxManager {
 
         if (mode === 'batch') {
             const count = parseInt(document.getElementById('reg-batch-count').value);
+            const strategy = this.getSelectedBatchStrategy();
             if (!Number.isInteger(count) || count < 2 || count > 100) {
                 this.showToast('error', '创建数量必须为 2–100');
                 return;
             }
 
-            if (!/^[a-zA-Z0-9]+$/.test(emailPrefix)) {
-                this.showToast('error', '批量前缀仅允许英文/数字');
-                return;
+            let addresses = [];
+            if (strategy === 'random') {
+                if (this.availableDomains.length === 0) {
+                    await this.loadAvailableDomains(false);
+                }
+                if (this.availableDomains.length === 0) {
+                    this.showToast('error', '暂无可用域名，无法批量创建');
+                    return;
+                }
+
+                // 优先提交预览中的方案，避免点击创建后地址突然变化。
+                const signature = this.getBatchPlanSignature();
+                if (this.batchPlanSignature !== signature || this.batchAddresses.length !== count) {
+                    this.refreshBatchPreview();
+                }
+                addresses = [...this.batchAddresses];
+            } else {
+                if (!emailPrefix || !emailDomain) {
+                    this.showToast('error', '请输入完整的用户名前缀和域名');
+                    return;
+                }
+                if (!/^[a-zA-Z0-9]+$/.test(emailPrefix)) {
+                    this.showToast('error', '批量前缀仅允许英文/数字');
+                    return;
+                }
+
+                const generated = this.generateBatchAddresses(emailPrefix, emailDomain, count);
+                const maxLocalPartLen = emailPrefix.length + generated.digits;
+                if (maxLocalPartLen > 20 || maxLocalPartLen < 3) {
+                    this.showToast('error', '前缀+序号后长度必须为 3–20');
+                    return;
+                }
+                addresses = generated.addresses;
             }
 
-            const { digits, addresses } = this.generateBatchAddresses(emailPrefix, emailDomain, count);
-            const maxLocalPartLen = emailPrefix.length + digits;
-            if (maxLocalPartLen > 20 || maxLocalPartLen < 3) {
-                this.showToast('error', '前缀+序号后长度必须为 3–20');
-                return;
-            }
-
-            // 兜底：确保任意生成的local-part都符合规则
-            const anyInvalid = addresses.some(addr => !this.isValidLocalPart(addr.split('@')[0]));
+            // 兜底验证数量、唯一性与 local-part，避免异常域名数据生成无效请求。
+            const usernames = addresses.map(address => address.split('@')[0]);
+            const anyInvalid = addresses.length !== count
+                || new Set(usernames).size !== count
+                || usernames.some(username => !this.isValidLocalPart(username));
             if (anyInvalid) {
                 this.showToast('error', '批量生成的用户名不符合规则，请调整前缀/数量');
                 return;
@@ -559,6 +858,11 @@ class AdminMailboxManager {
                 addresses,
                 ...commonOptions
             });
+            return;
+        }
+
+        if (!emailPrefix || !emailDomain) {
+            this.showToast('error', '请输入完整的邮箱地址');
             return;
         }
 
@@ -679,6 +983,7 @@ class AdminMailboxManager {
 
         try {
             this.setRegisterSubmitting(true);
+            this.updateBatchProgress(0, addresses.length, true);
 
             for (let i = 0; i < addresses.length; i++) {
                 const address = addresses[i];
@@ -703,22 +1008,34 @@ class AdminMailboxManager {
                         error: error.message || '创建失败'
                     });
                 }
+                this.updateBatchProgress(i + 1, addresses.length, true);
             }
 
             const total = results.length;
             const successCount = results.filter(r => r.success).length;
             const failedCount = total - successCount;
 
-            this.showToast('success', `批量创建完成：成功 ${successCount}，失败 ${failedCount}`);
+            const completionType = successCount === total
+                ? 'success'
+                : (successCount === 0 ? 'error' : 'warning');
+            const completionTitle = completionType === 'success'
+                ? '批量创建完成'
+                : (completionType === 'error' ? '批量创建失败' : '批量创建部分完成');
+            const completionIcon = completionType === 'success'
+                ? 'check-circle'
+                : (completionType === 'error' ? 'error' : 'warning');
+            // 按真实结果反馈状态，避免部分失败或全部失败仍显示绿色成功提示。
+            this.showToast(completionType, `${completionTitle}：成功 ${successCount}，失败 ${failedCount}`);
 
             // 显示结果
             if (form) form.style.display = 'none';
             if (result) {
                 result.style.display = 'block';
                 result.innerHTML = `
-                    <div class="success-message">
-                        ${uiIcon('check-circle')}
-                        <h3>批量创建完成</h3>
+                    <div class="success-message batch-completion-message ${completionType}">
+                        ${uiIcon(completionIcon)}
+                        <h3>${completionTitle}</h3>
+                        <p class="batch-completion-text">已完成 ${total}/${total}</p>
                     </div>
 
                     <div class="batch-result-summary">
@@ -856,7 +1173,7 @@ class AdminMailboxManager {
         // 创建来源标签配置
         const sourceLabels = {
             'admin': { text: '管理员', class: 'source-admin', icon: 'user-shield' },
-            'register': { text: '注册', class: 'source-register', icon: 'user-plus' },
+            'register': { text: '自助创建', class: 'source-register', icon: 'user-plus' },
             'api_v2': { text: 'API', class: 'source-api', icon: 'code' },
             'unknown': { text: '未知', class: 'source-unknown', icon: 'question' }
         };
@@ -1047,9 +1364,9 @@ function refreshAuditLogs() {
 
 function showTokenModal(mailbox) {
     const modal = document.createElement('div');
-    modal.className = 'modal show';
+    modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content modal-content--compact">
             <div class="modal-header">
                 <h3>邮箱创建成功</h3>
             </div>
@@ -1079,8 +1396,10 @@ function showTokenModal(mailbox) {
     modal.querySelector('[data-action="copy-token"]').addEventListener('click', () => {
         copyToClipboard(mailbox.access_token);
     });
-    modal.querySelector('[data-action="close"]').addEventListener('click', () => modal.remove());
-    document.body.appendChild(modal);
+    modal.querySelector('[data-action="close"]').addEventListener('click', () => {
+        closeAndRemoveAdminModal(modal);
+    });
+    openAdminModal(modal);
 }
 
 function copyToClipboard(text) {
@@ -1101,6 +1420,8 @@ function copyToClipboard(text) {
 
 // 添加到AdminMailboxManager类
 AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
+    // 在异步详情请求前保存列表触发按钮，后续串联确认框时才能把焦点还给原位置。
+    const viewOpener = document.activeElement;
     try {
         const response = await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`);
         const mailbox = response.data;
@@ -1113,9 +1434,9 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
         const storageLimit = safeNumber(mailbox.storage_limit_mb, 50);
 
         const modal = document.createElement('div');
-        modal.className = 'modal show';
+        modal.className = 'modal';
         modal.innerHTML = `
-            <div class="modal-content modal-large">
+            <div class="modal-content modal-content--wide">
                 <div class="modal-header">
                     <h3>${uiIcon('inbox')} 邮箱详情</h3>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
@@ -1252,7 +1573,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
         `;
         modal.querySelector('[data-role="access-link"]').href = accessPath;
         modal.querySelectorAll('[data-action="close"]').forEach(button => {
-            button.addEventListener('click', () => modal.remove());
+            button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
         });
         modal.querySelector('[data-action="copy-token"]').addEventListener('click', () => {
             copyToClipboard(mailbox.access_token);
@@ -1264,21 +1585,21 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
             copyToClipboard(accessUrl);
         });
         modal.querySelector('[data-action="reset-token"]').addEventListener('click', () => {
-            modal.remove();
-            resetMailboxToken(mailboxId);
+            closeAndRemoveAdminModal(modal);
+            resetMailboxToken(mailboxId, viewOpener);
         });
         modal.querySelector('[data-action="edit"]').addEventListener('click', () => {
-            modal.remove();
+            closeAndRemoveAdminModal(modal);
             this.editMailbox(mailboxId);
         });
         const enableButton = modal.querySelector('[data-action="enable"]');
         if (enableButton) {
             enableButton.addEventListener('click', () => {
-                modal.remove();
-                enableMailbox(mailboxId);
+                closeAndRemoveAdminModal(modal);
+                enableMailbox(mailboxId, viewOpener);
             });
         }
-        document.body.appendChild(modal);
+        openAdminModal(modal, viewOpener);
     } catch (error) {
         this.showToast('error', '加载邮箱详情失败');
     }
@@ -1292,9 +1613,9 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
         const allowedDomains = Array.isArray(mailbox.allowed_domains) ? mailbox.allowed_domains : [];
 
         const modal = document.createElement('div');
-        modal.className = 'modal show';
+        modal.className = 'modal';
         modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content modal-content--medium">
                 <div class="modal-header">
                     <h3>编辑邮箱</h3>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
@@ -1350,12 +1671,12 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
         modal.querySelector('#edit-whitelist-enabled').checked = Boolean(mailbox.whitelist_enabled);
         modal.querySelector('#edit-is-active').checked = Boolean(mailbox.is_active);
         modal.querySelectorAll('[data-action="close"]').forEach(button => {
-            button.addEventListener('click', () => modal.remove());
+            button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
         });
         modal.querySelector('[data-action="save"]').addEventListener('click', () => {
             this.saveMailboxEdit(mailboxId, modal);
         });
-        document.body.appendChild(modal);
+        openAdminModal(modal);
     } catch (error) {
         this.showToast('error', '加载邮箱信息失败');
     }
@@ -1397,7 +1718,7 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
         });
 
         this.showToast('success', '更新成功');
-        modal.remove();
+        closeAndRemoveAdminModal(modal);
 
         if (this.currentView === 'mailboxes') {
             this.loadMailboxes();
@@ -1411,9 +1732,9 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
 AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
     // 显示确认模态框
     const modal = document.createElement('div');
-    modal.className = 'modal show';
+    modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content modal-content--compact">
             <div class="modal-header">
                 <h3>确认删除</h3>
                 <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
@@ -1445,12 +1766,12 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
         </div>
     `;
     modal.querySelectorAll('[data-action="close"]').forEach(button => {
-        button.addEventListener('click', () => modal.remove());
+        button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
     });
     modal.querySelector('[data-action="confirm"]').addEventListener('click', () => {
         this.confirmDeleteMailbox(mailboxId, modal);
     });
-    document.body.appendChild(modal);
+    openAdminModal(modal);
 };
 
 AdminMailboxManager.prototype.confirmDeleteMailbox = async function(mailboxId, modal) {
@@ -1460,7 +1781,7 @@ AdminMailboxManager.prototype.confirmDeleteMailbox = async function(mailboxId, m
         });
 
         this.showToast('success', '邮箱已删除');
-        modal.remove();
+        closeAndRemoveAdminModal(modal);
 
         if (this.currentView === 'mailboxes') {
             this.loadMailboxes();
@@ -1516,10 +1837,10 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
 
 AdminMailboxManager.prototype.showAuditDetail = function(log) {
     const modal = document.createElement('div');
-    modal.className = 'modal show';
+    modal.className = 'modal';
 
     modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content modal-content--medium">
                 <div class="modal-header">
                     <h3>${uiIcon('info')} 审计日志详情</h3>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
@@ -1570,9 +1891,9 @@ AdminMailboxManager.prototype.showAuditDetail = function(log) {
     }
     modal.querySelector('[data-role="changes"]').textContent = changesText;
     modal.querySelectorAll('[data-action="close"]').forEach(button => {
-        button.addEventListener('click', () => modal.remove());
+        button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
     });
-    document.body.appendChild(modal);
+    openAdminModal(modal);
 };
 
 // 全选/取消全选
@@ -1611,9 +1932,9 @@ async function batchDeleteMailboxes() {
 
     // 创建确认模态框
     const modal = document.createElement('div');
-    modal.className = 'modal show';
+    modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content modal-content--compact">
             <div class="modal-header">
                 <h3>确认批量删除</h3>
                 <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
@@ -1644,16 +1965,14 @@ async function batchDeleteMailboxes() {
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
-
     modal.querySelectorAll('[data-action="close"]').forEach(button => {
-        button.addEventListener('click', () => modal.remove());
+        button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
     });
 
     // 绑定确认按钮事件
     modal.querySelector('#confirm-batch-delete-btn').onclick = async () => {
         try {
-            modal.remove();
+            closeAndRemoveAdminModal(modal);
 
             const response = await adminManager.apiRequest('/api/admin/mailboxes/batch-delete', {
                 method: 'POST',
@@ -1675,11 +1994,18 @@ async function batchDeleteMailboxes() {
             adminManager.showToast('error', '批量删除失败: ' + error.message);
         }
     };
+    openAdminModal(modal);
 }
 
 // 重置邮箱token
-async function resetMailboxToken(mailboxId) {
-    if (!confirm('确定要重置此邮箱的访问令牌吗？重置后旧令牌将失效。')) {
+async function resetMailboxToken(mailboxId, opener = document.activeElement) {
+    if (!await confirmAdminAction({
+        title: '重置访问令牌',
+        message: '确定要重置此邮箱的访问令牌吗？重置后旧令牌将失效。',
+        confirmLabel: '确认重置',
+        danger: true,
+        opener,
+    })) {
         return;
     }
 
@@ -1692,10 +2018,10 @@ async function resetMailboxToken(mailboxId) {
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content modal-content--compact">
                 <div class="modal-header">
                     <h3>${uiIcon('key')} 新的访问令牌</h3>
-                    <button class="close-btn" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
+                    <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                         ${uiIcon('close')}
                     </button>
                 </div>
@@ -1725,9 +2051,9 @@ async function resetMailboxToken(mailboxId) {
             copyToClipboard(newToken);
         });
         modal.querySelectorAll('[data-action="close"]').forEach(button => {
-            button.addEventListener('click', () => modal.remove());
+            button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
         });
-        document.body.appendChild(modal);
+        openAdminModal(modal, opener);
 
         adminManager.showToast('success', '令牌重置成功');
     } catch (error) {
@@ -1736,8 +2062,13 @@ async function resetMailboxToken(mailboxId) {
 }
 
 // 恢复（启用）邮箱
-async function enableMailbox(mailboxId) {
-    if (!confirm('确定要恢复此邮箱吗？恢复后用户可以正常访问。')) {
+async function enableMailbox(mailboxId, opener = document.activeElement) {
+    if (!await confirmAdminAction({
+        title: '恢复邮箱',
+        message: '确定要恢复此邮箱吗？恢复后用户可以正常访问。',
+        confirmLabel: '确认恢复',
+        opener,
+    })) {
         return;
     }
 
@@ -1800,7 +2131,11 @@ async function loadBlockedIPs() {
 
 // 解除IP封禁
 async function unblockIP(ip) {
-    if (!confirm(`确定要解除 ${ip} 的封禁吗？`)) {
+    if (!await confirmAdminAction({
+        title: '解除 IP 封禁',
+        message: `确定要解除 ${ip} 的封禁吗？`,
+        confirmLabel: '解除封禁',
+    })) {
         return;
     }
 
@@ -1833,7 +2168,7 @@ async function loadSourceStats() {
                 gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
             },
             'register': {
-                label: '用户注册',
+                label: '自助创建',
                 icon: 'user-plus',
                 gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
             },
@@ -2223,7 +2558,12 @@ async function saveSubAdmin(event) {
 
 // 删除子管理员
 async function deleteSubAdmin(subAdminId, token) {
-    if (!confirm(`确定要删除子管理员 "${token}" 吗？`)) {
+    if (!await confirmAdminAction({
+        title: '删除子管理员',
+        message: `确定要删除子管理员 "${token}" 吗？`,
+        confirmLabel: '确认删除',
+        danger: true,
+    })) {
         return;
     }
 

@@ -36,19 +36,23 @@
 | 页面 | 路由 | 主要组件 | 保留的业务边界 |
 | --- | --- | --- | --- |
 | 邮箱登录 | `/`、`/web` | 凭据表单、密码可见性、主题切换、状态提示 | 只生成 `/web/<编码邮箱>----<编码密钥>` |
-| 收件箱 | `/web/<邮箱>----<密钥>` | 导航、邮件列表、详情、批量操作、空状态、切换邮箱 | 仅收件、查看、标记和删除，不提供写信能力 |
+| 收件箱 | `/web/<邮箱>----<密钥>` | 几何居中的邮箱地址、邮件列表、详情、批量操作、空状态、切换邮箱 | 仅收件、查看、标记和删除，不提供写信能力 |
 | 邮箱注册 | `/register` | 管理员验证、注册表单、域名选择、结果提示 | 使用现有管理员授权注册接口 |
 | API 调试台 | `/api-test` | 凭据交换、邮箱信息、收件箱只读输出 | 凭据仅保存在运行时内存，不提供写接口 |
-| 管理后台 | `/admin` | 登录、统计卡片、邮箱表格、审计、配置、子管理员和 Dialog | 保留既有 DOM 与 `/api/admin/*` 契约 |
+| 管理后台 | `/admin` | 登录、统计卡片、邮箱创建、邮箱表格、审计、配置、子管理员和分级 Dialog | 保留 `register` 内部标识与 `/api/admin/*` 契约 |
+
+管理端“邮箱创建”支持两种批量策略：默认从英文名、英文姓和四位数字组成不同用户名，并将去重后的全部可用域名逐轮洗牌分配；也可继续使用“前缀 + 序号”。批量操作先展示前 3 条确定性预览，再按该预览方案逐个调用既有创建接口，显示“已完成 x/y”和每条成功/失败结果，不引入新的批量 API。
 
 ## 4. 安全与可访问性约束
 
 - 邮箱访问链接不兼容旧 `/mailbox?address=...&token=...` 形式，只使用固定的 `/web/<邮箱>----<密钥>` 路由。
+- 新建、迁移补齐和手动轮换的邮箱密钥统一为 10 位大小写英文字母与数字，并保证至少包含大写、小写和数字；数据库中既有 UUID 密钥不做批量轮换且继续可用。
 - 邮箱访问令牌通过 `Authorization: Bearer` 发送，不写入查询参数；邮箱密钥不写入 Web Storage。
 - API 调试台只调用密钥交换、邮箱信息和收件箱查询接口，所有输出使用纯文本方式渲染。
 - 公开收件箱与调试台不包含写信、回复、转发、发件箱或测试发信入口。
 - 管理端继续使用现有 Bearer 管理鉴权；动态服务端数据必须转义或通过 `textContent / value` 写入 DOM。
-- 交互控件提供 `:focus-visible` 焦点提示，关键按钮保持可触达尺寸；Dialog 由共享组件处理焦点恢复。
+- 交互控件提供 `:focus-visible` 焦点提示，关键按钮保持可触达尺寸；Dialog 按紧凑 `420px`、中等 `560px`、宽版 `760px` 分档，由共享组件补充可访问名称并处理焦点约束、Escape 关闭和焦点恢复。
+- 复制、刷新、删除、已读等短操作统一使用按内容收缩的 Toast，最大宽度 `320px`；收件箱页清除共享顶部定位并固定在右下角，避免 `top` 与 `bottom` 同时生效造成整屏拉伸。
 - `prefers-reduced-motion: reduce` 下压缩动画与过渡；共享样式在 768px 和 480px 提供响应式降级。
 - `/web/...` 中的邮箱密钥属于敏感凭据，部署时仍需对反向代理和可观测性访问日志进行脱敏。
 
@@ -65,7 +69,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1
 1. Python `compileall` 语法检查；
 2. `src/frontend/static/scripts/` 下全部 JavaScript 的 `node --check`；
 3. `pytest` 回归测试；
-4. `docker compose config --quiet` 配置校验。
+4. Git 工作树存在时执行 `git diff --check`；
+5. `docker compose config --quiet` 配置校验。
 
 需要同时验证镜像构建时运行：
 
@@ -79,13 +84,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 | --- | --- |
 | Python compileall | 通过 |
 | 全部 JavaScript `node --check` | 通过 |
-| pytest | `26 passed, 133 subtests passed` |
+| pytest | `37 passed, 139 subtests passed` |
 | Docker Compose 配置 | 通过 |
 | Docker 镜像构建 | 在目标服务器通过 |
-| 桌面与移动端浏览器验收 | 通过，无横向溢出或控制台错误 |
-| 本地移动端 Lighthouse | Accessibility / Best Practices / SEO / Agentic Browsing 均为 `100` |
+| 桌面与移动端浏览器验收 | 通过；1536px 下顶栏与工作区均为 1240px 且邮箱地址居中，390px 下无横向溢出 |
+| 收件箱 Toast 浏览器验收 | 复制成功提示约 `201 × 46px`，右下角内容自适应，无横向溢出 |
 
-### 生产部署验证
+### 生产部署基线（本轮上线前）
 
 - 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；实际部署提交以服务器内 `.deploy-version` 与 `.deploy-commit` 为准；
 - 生产 `.env` 仅存在于服务器且权限为 `600`；Compose 服务 `tempmail` 为 `healthy`，Web 仅绑定 `127.0.0.1:8081`，SMTP 保持公网 `25`；
@@ -93,8 +98,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 - `/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
 - 旧 `/mailbox?address=...&token=...` 与不含 `----` 的 `/web/...` 均返回 `404`；
 - 管理员认证、真实客户端 IP、凭据页禁止缓存响应头与 SMTP 投递到收件箱的端到端链路均已通过在线检查；测试邮箱、邮件和对应审计记录已精确清理；
-- 数据库 `quick_check=ok`，部署前后保持 `137` 个邮箱、`49` 封邮件、`863` 条审计日志和 `2` 个子管理员；既有 `726` 条孤立审计日志外键问题未在本次 UI 部署中改写；
-- 容器健康检查不保存 HTML 响应体；邮件数据目录权限为 `700`；回滚备份位于 `/root/maildrop-master-backups/20260719-231731-before-8271de6`。
+- 数据库 `quick_check=ok`；本轮上线前只读快照为 `140` 个邮箱、`97` 封邮件和 `903` 条审计日志，部署时必须重新生成一致性数据库备份并对比上线前后数据；
+- 容器健康检查不保存 HTML 响应体；邮件数据目录权限为 `700`；上一份回滚备份位于 `/root/maildrop-master-backups/20260719-233347-before-e45a113`，本轮部署前不得复用该旧数据快照。
 
 ## 6. 部署步骤
 

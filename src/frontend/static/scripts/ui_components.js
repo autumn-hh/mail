@@ -97,6 +97,7 @@
     });
 
     const dialogOpeners = new WeakMap();
+    let dialogAccessibleNameSequence = 0;
 
     function normalizeIconName(name) {
         return iconAliases[String(name || '').toLowerCase()] || 'question';
@@ -185,7 +186,21 @@
         )).filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
     }
 
-    function trapDialogFocus(event) {
+    function handleDialogKeydown(event) {
+        if (event.key === 'Escape' && !(event.currentTarget instanceof HTMLDialogElement)) {
+            // 非原生后台弹窗没有浏览器默认的 Escape 行为，优先复用其关闭按钮以完成清理和焦点归还。
+            const closeControl = event.currentTarget.querySelector(
+                '[data-dialog-close], [data-action="close"], .modal-close'
+            );
+            if (closeControl instanceof HTMLElement) {
+                event.preventDefault();
+                closeControl.click();
+            } else {
+                closeDialog(event.currentTarget);
+            }
+            return;
+        }
+
         if (event.key !== 'Tab') {
             return;
         }
@@ -213,6 +228,25 @@
 
         dialogOpeners.set(dialog, opener instanceof HTMLElement ? opener : null);
         dialog.classList.add('ui-dialog');
+        // 弹窗必须带可访问名称；统一关联首个标题，避免各页面重复维护 aria-labelledby。
+        if (!dialog.hasAttribute('aria-label') && !dialog.hasAttribute('aria-labelledby')) {
+            const title = dialog.querySelector('[data-dialog-title], .modal-header h1, .modal-header h2, .modal-header h3, .modal-header h4, .dialog-header h1, .dialog-header h2, .dialog-header h3, .dialog-header h4');
+            if (title instanceof HTMLElement) {
+                if (!title.id) {
+                    dialogAccessibleNameSequence += 1;
+                    title.id = `ui-dialog-title-${dialogAccessibleNameSequence}`;
+                }
+                dialog.setAttribute('aria-labelledby', title.id);
+            }
+        }
+        const description = dialog.querySelector('[data-dialog-description]');
+        if (!dialog.hasAttribute('aria-describedby') && description instanceof HTMLElement) {
+            if (!description.id) {
+                dialogAccessibleNameSequence += 1;
+                description.id = `ui-dialog-description-${dialogAccessibleNameSequence}`;
+            }
+            dialog.setAttribute('aria-describedby', description.id);
+        }
         if (dialog instanceof HTMLDialogElement) {
             if (!dialog.open) {
                 dialog.showModal();
@@ -223,7 +257,7 @@
             dialog.setAttribute('role', dialog.getAttribute('role') || 'dialog');
             dialog.setAttribute('aria-modal', 'true');
             dialog.setAttribute('aria-hidden', 'false');
-            dialog.addEventListener('keydown', trapDialogFocus);
+            dialog.addEventListener('keydown', handleDialogKeydown);
         }
 
         const focusable = getFocusableElements(dialog);
@@ -244,7 +278,7 @@
             dialog.hidden = true;
             dialog.classList.remove('is-open');
             dialog.setAttribute('aria-hidden', 'true');
-            dialog.removeEventListener('keydown', trapDialogFocus);
+            dialog.removeEventListener('keydown', handleDialogKeydown);
         }
 
         const opener = dialogOpeners.get(dialog);

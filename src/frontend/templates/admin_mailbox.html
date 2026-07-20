@@ -44,7 +44,7 @@
                     </li>
                     <li class="nav-item" data-view="register" role="button" tabindex="0">
                         <svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#user-plus"></use></svg>
-                        <span>用户注册</span>
+                        <span>邮箱创建</span>
                     </li>
                     <li class="nav-item" data-view="sub-admins" role="button" tabindex="0">
                         <svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#users"></use></svg>
@@ -313,7 +313,7 @@
                         <select id="source-filter-select" onchange="changeSourceFilter(this.value)">
                             <option value="all">全部</option>
                             <option value="admin">管理员</option>
-                            <option value="register">注册</option>
+                            <option value="register">自助创建</option>
                             <option value="api_v2">API</option>
                             <option value="unknown">未知</option>
                         </select>
@@ -503,10 +503,10 @@
                 </div>
             </div>
 
-            <!-- 用户注册视图 -->
+            <!-- 邮箱创建视图：沿用 register 内部标识，避免破坏既有路由与统计契约。 -->
             <div class="view register-view" id="register-view" style="display: none;">
                 <div class="view-header">
-                    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#user-plus"></use></svg> 用户注册</h2>
+                    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#user-plus"></use></svg> 邮箱创建</h2>
                 </div>
 
                 <div class="register-content">
@@ -524,11 +524,26 @@
                                         <span>批量创建</span>
                                     </label>
                                 </div>
-                                <small>批量创建会使用“用户名前缀 + 序号（补零）”生成用户名</small>
+                                <small>批量创建默认生成不同的英文姓名用户名，并在可用域名间随机轮转</small>
                             </div>
 
-                            <div class="form-group">
-                                <label>邮箱地址 *</label>
+                            <div class="form-group" id="reg-batch-strategy-group" hidden>
+                                <label>批量用户名规则 *</label>
+                                <div class="register-mode-toggle batch-strategy-toggle">
+                                    <label class="mode-option">
+                                        <input type="radio" name="reg-batch-strategy" value="random" checked>
+                                        <span>随机姓名与域名</span>
+                                    </label>
+                                    <label class="mode-option">
+                                        <input type="radio" name="reg-batch-strategy" value="sequence">
+                                        <span>前缀 + 序号</span>
+                                    </label>
+                                </div>
+                                <small id="reg-batch-strategy-help">随机姓名模式会从全部可用域名中去重、洗牌后轮转分配</small>
+                            </div>
+
+                            <div class="form-group" id="reg-email-address-group">
+                                <label id="reg-email-address-label">邮箱地址 *</label>
                                 <div class="email-input-group">
                                     <input type="text" id="reg-email-prefix" required placeholder="username" class="email-prefix-input">
                                     <span class="at-symbol">@</span>
@@ -539,13 +554,21 @@
                                         <svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#swap"></use></svg>
                                     </button>
                                 </div>
-                                <small>用户名仅允许英文/数字，长度 3–20；随机生成会生成“英文名+4位数字”</small>
+                                <small>用户名仅允许英文/数字，长度 3–20；随机生成会生成“英文名+英文姓+4位数字”</small>
                             </div>
 
                             <div class="form-group" id="reg-batch-count-group" style="display: none;">
                                 <label for="reg-batch-count">创建数量 *</label>
                                 <input type="number" id="reg-batch-count" min="2" max="100" value="2" required>
                                 <small>一次可创建 2–100 个邮箱</small>
+                            </div>
+
+                            <div class="form-group batch-preview" id="reg-batch-preview-group" hidden>
+                                <div class="batch-preview-header">
+                                    <label>创建预览</label>
+                                    <small>展示即将创建的前 3 个邮箱</small>
+                                </div>
+                                <ol class="batch-preview-list" id="reg-batch-preview-list" aria-live="polite"></ol>
                             </div>
 
                             <div class="form-group">
@@ -581,6 +604,14 @@
                                     <input type="checkbox" id="reg-whitelist-enabled">
                                     启用白名单过滤
                                 </label>
+                            </div>
+
+                            <div class="batch-progress" id="reg-batch-progress" hidden aria-live="polite">
+                                <div class="batch-progress-copy">
+                                    <span>批量创建进度</span>
+                                    <strong id="reg-batch-progress-text">已完成 0/0</strong>
+                                </div>
+                                <progress id="reg-batch-progress-bar" value="0" max="1">0%</progress>
                             </div>
 
                             <button type="submit" class="btn btn-primary btn-block">
@@ -664,7 +695,7 @@
 
     <!-- 创建/编辑子管理员模态框 -->
     <div class="modal" id="sub-admin-modal">
-        <div class="modal-content">
+        <div class="modal-content modal-content--medium">
             <div class="modal-header">
                 <h3 id="sub-admin-modal-title">添加子管理员</h3>
                 <button class="modal-close" onclick="closeSubAdminModal()" title="关闭子管理员对话框" aria-label="关闭子管理员对话框">&times;</button>

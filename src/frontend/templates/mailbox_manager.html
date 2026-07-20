@@ -32,29 +32,32 @@
 
     <div class="app-shell" id="mailbox-app" hidden>
         <header class="topbar">
-            <a class="brand" href="/" aria-label="Maildrop 登录首页">
-                <span class="brand-icon"><svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#mail"></use></svg></span>
-                <span>Maildrop</span>
-            </a>
+            <!-- 等宽两翼让邮箱地址不受左右操作数量影响，始终处于桌面视口中心。 -->
+            <div class="topbar-inner">
+                <a class="brand" href="/" aria-label="Maildrop 登录首页">
+                    <span class="brand-icon"><svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#mail"></use></svg></span>
+                    <span>Maildrop</span>
+                </a>
 
-            <div class="address-block">
-                <span class="status-dot" id="status-dot" aria-hidden="true"></span>
-                <div>
-                    <p class="address-label">当前邮箱</p>
-                    <h1 id="mailbox-address">—</h1>
+                <div class="address-block">
+                    <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+                    <div>
+                        <p class="address-label">当前邮箱</p>
+                        <h1 id="mailbox-address">—</h1>
+                    </div>
                 </div>
-            </div>
 
-            <div class="topbar-actions">
-                <button class="icon-button" id="copy-address" type="button" aria-label="复制邮箱地址" title="复制邮箱地址">
-                    <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#copy"></use></svg>
-                </button>
-                <button class="icon-button" id="refresh-button" type="button" aria-label="刷新邮件" title="刷新邮件">
-                    <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#refresh"></use></svg>
-                </button>
-                <button class="icon-button" id="theme-toggle" type="button" aria-label="主题：跟随系统" title="切换主题">
-                    <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#theme"></use></svg>
-                </button>
+                <div class="topbar-actions">
+                    <button class="icon-button" id="copy-address" type="button" aria-label="复制邮箱地址" title="复制邮箱地址">
+                        <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#copy"></use></svg>
+                    </button>
+                    <button class="icon-button" id="refresh-button" type="button" aria-label="刷新邮件" title="刷新邮件">
+                        <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#refresh"></use></svg>
+                    </button>
+                    <button class="icon-button" id="theme-toggle" type="button" aria-label="主题：跟随系统" title="切换主题">
+                        <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#theme"></use></svg>
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -200,7 +203,7 @@
         </div>
     </div>
 
-    <dialog class="ui-dialog confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <dialog class="ui-dialog ui-dialog--compact confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
         <div class="confirm-dialog-content">
             <span class="confirm-dialog-icon" aria-hidden="true">
                 <svg class="icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#alert-triangle"></use></svg>

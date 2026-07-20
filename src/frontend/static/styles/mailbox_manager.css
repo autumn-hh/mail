@@ -141,16 +141,22 @@ a {
     position: sticky;
     top: 0;
     z-index: 10;
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 24px;
-    min-height: 88px;
-    padding: 14px clamp(22px, 4vw, 52px);
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface) 88%, transparent);
     box-shadow: 0 10px 24px rgba(42, 75, 69, 0.07);
     backdrop-filter: blur(18px);
+}
+
+/* 等宽左右轨道让中间邮箱地址保持视口几何居中，而不是被操作按钮推偏。 */
+.topbar-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 24px;
+    width: min(1240px, calc(100% - 48px));
+    min-height: 80px;
+    margin: 0 auto;
+    padding: 10px 0;
 }
 
 .brand {
@@ -161,6 +167,7 @@ a {
     font-size: 1.05rem;
     font-weight: 800;
     letter-spacing: -0.02em;
+    justify-self: start;
 }
 
 .brand-icon {
@@ -179,6 +186,7 @@ a {
     align-items: center;
     gap: 12px;
     min-width: 0;
+    justify-self: center;
 }
 
 .status-dot {
@@ -215,6 +223,10 @@ a {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.topbar-actions {
+    justify-self: end;
 }
 
 .icon-button,
@@ -264,17 +276,17 @@ a {
 
 .workspace {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: clamp(24px, 4vw, 48px);
-    width: min(1480px, calc(100% - 48px));
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: clamp(22px, 3vw, 36px);
+    width: min(1240px, calc(100% - 48px));
     margin: 0 auto;
-    padding: 34px 0 56px;
+    padding: 24px 0 48px;
 }
 
 .sidebar {
     align-self: start;
     position: sticky;
-    top: 122px;
+    top: 104px;
 }
 
 .view-nav {
@@ -872,12 +884,16 @@ input[type="checkbox"] {
 
 .toast-region {
     position: fixed;
+    /* 覆盖共享顶部定位，避免 top 与 bottom 同时生效把 Toast 网格拉成整屏高度。 */
+    top: auto;
     right: 24px;
     bottom: 24px;
+    left: auto;
     z-index: 30;
     display: grid;
-    gap: 10px;
-    width: min(360px, calc(100vw - 32px));
+    align-content: end;
+    gap: 8px;
+    width: min(320px, calc(100vw - 24px));
 }
 
 .toast {
@@ -912,10 +928,9 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 900px) {
-    .topbar {
-        grid-template-columns: auto minmax(0, 1fr) auto;
+    .topbar-inner {
         gap: 16px;
-        padding-inline: 22px;
+        width: min(100% - 36px, 980px);
     }
 
     .brand > span:last-child {
@@ -925,7 +940,7 @@ input[type="checkbox"] {
     .workspace {
         grid-template-columns: 1fr;
         width: min(100% - 36px, 980px);
-        padding-top: 22px;
+        padding-top: 18px;
     }
 
     .sidebar {
@@ -959,10 +974,11 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 720px) {
-    .topbar {
+    .topbar-inner {
         grid-template-columns: minmax(0, 1fr) auto;
-        min-height: 78px;
-        padding: 11px 17px;
+        min-height: 72px;
+        width: calc(100% - 34px);
+        padding: 8px 0;
     }
 
     .brand {
@@ -971,6 +987,10 @@ input[type="checkbox"] {
 
     .address-block h1 {
         max-width: calc(100vw - 205px);
+    }
+
+    .address-block {
+        justify-self: start;
     }
 
     .topbar-actions {
@@ -1070,8 +1090,8 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 520px) {
-    .topbar {
-        padding-inline: 12px;
+    .topbar-inner {
+        width: calc(100% - 24px);
     }
 
     .address-block {
@@ -1165,9 +1185,10 @@ input[type="checkbox"] {
     }
 
     .toast-region {
+        top: auto;
         right: 8px;
         bottom: 8px;
-        width: calc(100vw - 16px);
+        width: min(300px, calc(100vw - 16px));
     }
 
     .auth-state {
@@ -1179,7 +1200,10 @@ input[type="checkbox"] {
     }
 }
 
-.confirm-dialog {
+/* 删除确认属于短任务，限制为紧凑宽度可避免少量内容占据大半屏幕。 */
+dialog.confirm-dialog {
+    width: min(420px, calc(100vw - 32px));
+    max-height: min(76dvh, 560px);
     padding: 28px;
 }
 
@@ -1223,7 +1247,7 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 480px) {
-    .confirm-dialog {
+    dialog.confirm-dialog {
         width: calc(100vw - 24px);
         padding: 22px 18px;
     }

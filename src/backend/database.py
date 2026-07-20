@@ -1,11 +1,35 @@
-import sqlite3
 import json
+import os
+import secrets
+import sqlite3
+import string
 import time
 import uuid
-import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
 import config
+
+
+_MAILBOX_KEY_LENGTH = 10
+
+
+def _generate_mailbox_key() -> str:
+    """生成固定长度且包含三类字符的安全邮箱密钥。"""
+    # 先放入每类必需字符，避免纯随机结果偶尔缺少某一类而降低可读规则的稳定性。
+    characters = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+    ]
+    alphabet = string.ascii_letters + string.digits
+    characters.extend(
+        secrets.choice(alphabet)
+        for _ in range(_MAILBOX_KEY_LENGTH - len(characters))
+    )
+    secrets.SystemRandom().shuffle(characters)
+    return ''.join(characters)
+
 
 class DatabaseManager:
     def __init__(self, db_path: str = None):
@@ -90,7 +114,7 @@ class DatabaseManager:
                 conn.executemany('''
                     UPDATE mailboxes SET mailbox_key = ? WHERE id = ?
                 ''', [
-                    (str(uuid.uuid4()), row['id'])
+                    (_generate_mailbox_key(), row['id'])
                     for row in missing_key_rows
                 ])
 
@@ -301,7 +325,7 @@ class DatabaseManager:
         """创建新邮箱"""
         mailbox_id = str(uuid.uuid4())
         access_token = str(uuid.uuid4())
-        mailbox_key = str(uuid.uuid4())  # 生成邮箱密钥
+        mailbox_key = _generate_mailbox_key()
         current_time = int(time.time())
         expires_at = current_time + (retention_days * 24 * 60 * 60)
 
@@ -888,8 +912,8 @@ class DatabaseManager:
             if not mailbox or mailbox.get('mailbox_key') != current_key:
                 return None
 
-            # 生成新密钥
-            new_key = str(uuid.uuid4())
+            # 复用统一生成器，确保新建、迁移与轮换后的密钥规则完全一致。
+            new_key = _generate_mailbox_key()
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''

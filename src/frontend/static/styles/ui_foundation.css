@@ -317,7 +317,7 @@ svg {
     z-index: var(--z-toast);
     display: grid;
     width: min(380px, calc(100vw - 32px));
-    gap: 10px;
+    gap: 8px;
     pointer-events: none;
 }
 
@@ -326,16 +326,31 @@ svg {
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: 10px;
-    min-height: 52px;
-    padding: 12px 14px;
+    justify-self: end;
+    width: fit-content;
+    max-width: min(320px, 100%);
+    gap: 8px;
+    min-height: 40px;
+    padding: 6px 10px;
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     color: var(--text);
     background: var(--surface-strong);
-    box-shadow: var(--shadow-soft);
+    box-shadow: var(--shadow-small);
+    font-size: 0.875rem;
+    line-height: 1.35;
     pointer-events: auto;
     animation: ui-toast-in var(--ease) both;
+}
+
+.ui-toast-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.ui-toast-message {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .ui-toast[data-type="success"],
@@ -350,8 +365,8 @@ svg {
 
 .ui-toast-close {
     display: grid;
-    width: 36px;
-    min-height: 36px;
+    width: 32px;
+    min-height: 32px;
     padding: 0;
     place-items: center;
     border: 0;
@@ -361,8 +376,10 @@ svg {
 }
 
 dialog.ui-dialog {
-    width: min(680px, calc(100vw - 32px));
-    max-height: min(86vh, 820px);
+    /* 默认收敛为中等尺寸，避免只有少量内容时仍占据大半屏幕。 */
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(84vh, 720px);
+    max-height: min(84dvh, 720px);
     padding: 0;
     overflow: auto;
     border: 1px solid var(--border-strong);
@@ -370,6 +387,25 @@ dialog.ui-dialog {
     color: var(--text);
     background: var(--surface);
     box-shadow: var(--shadow-raised);
+}
+
+/* 按内容密度分档，而不是让所有功能弹窗共享同一个过大宽度。 */
+dialog.ui-dialog.ui-dialog--compact {
+    width: min(420px, calc(100vw - 32px));
+    max-height: min(76vh, 560px);
+    max-height: min(76dvh, 560px);
+}
+
+dialog.ui-dialog.ui-dialog--medium {
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(84vh, 720px);
+    max-height: min(84dvh, 720px);
+}
+
+dialog.ui-dialog.ui-dialog--wide {
+    width: min(760px, calc(100vw - 32px));
+    max-height: min(88vh, 800px);
+    max-height: min(88dvh, 800px);
 }
 
 dialog.ui-dialog::backdrop {

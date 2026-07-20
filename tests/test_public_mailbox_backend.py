@@ -2,6 +2,7 @@ import atexit
 import os
 import shutil
 import sqlite3
+import string
 import sys
 import tempfile
 import time
@@ -46,6 +47,15 @@ class PublicMailboxBackendTest(unittest.TestCase):
     @staticmethod
     def bearer(mailbox):
         return {'Authorization': f"Bearer {mailbox['access_token']}"}
+
+    def assert_mailbox_key_format(self, mailbox_key):
+        """验证新密钥固定满足产品约定，而不是依赖随机结果碰巧通过。"""
+        self.assertEqual(len(mailbox_key), 10)
+        self.assertTrue(all(char in string.ascii_letters + string.digits
+                            for char in mailbox_key))
+        self.assertTrue(any(char in string.ascii_uppercase for char in mailbox_key))
+        self.assertTrue(any(char in string.ascii_lowercase for char in mailbox_key))
+        self.assertTrue(any(char in string.digits for char in mailbox_key))
 
     @staticmethod
     def add_email(mailbox, subject='测试邮件'):
@@ -124,11 +134,19 @@ class PublicMailboxBackendTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/admin/test_ip', json={}).status_code, 404)
 
     def test_mailbox_key_is_available_through_database_handler(self):
-        mailbox = self.create_mailbox('key-field')
+        generated_key = 'Aa1Bb2Cc3D'
+        # 固定生成器返回值，稳定证明新建路径确实复用统一实现。
+        with patch('database._generate_mailbox_key', return_value=generated_key):
+            mailbox = self.create_mailbox('key-field')
         by_address = db_manager.get_mailbox_by_address(mailbox['address'])
         public_handler_data = db_inbox_handler.get_mailbox_info(mailbox['address'])
+        self.assertEqual(mailbox['mailbox_key'], generated_key)
         self.assertEqual(by_address['mailbox_key'], mailbox['mailbox_key'])
         self.assertEqual(public_handler_data['mailbox_key'], mailbox['mailbox_key'])
+
+    def test_generated_mailbox_key_has_required_character_classes(self):
+        mailbox = self.create_mailbox('generated-key-format')
+        self.assert_mailbox_key_format(mailbox['mailbox_key'])
 
     def test_old_database_rows_receive_a_mailbox_key(self):
         old_path = TEST_DATA / f'old-{uuid.uuid4().hex}.db'
@@ -158,9 +176,49 @@ class PublicMailboxBackendTest(unittest.TestCase):
                 '[]', 'legacy-token', now,
             ))
 
-        migrated = DatabaseManager(str(old_path)).get_mailbox_by_address('legacy@example.com')
+        generated_key = 'Zz9Yy8Xx7W'
+        # 固定补齐结果，避免通过概率断言判断迁移是否调用统一生成器。
+        with patch('database._generate_mailbox_key', return_value=generated_key):
+            migrated = DatabaseManager(str(old_path)).get_mailbox_by_address(
+                'legacy@example.com'
+            )
         self.assertIsNotNone(migrated['mailbox_key'])
-        self.assertGreaterEqual(len(migrated['mailbox_key']), 6)
+        self.assertEqual(migrated['mailbox_key'], generated_key)
+
+    def test_regenerate_mailbox_key_uses_generator_and_keeps_access_token(self):
+        mailbox = self.create_mailbox('regenerate-key')
+        generated_key = 'Qq1Ww2Ee3R'
+
+        # 密钥轮换只能更新 mailbox_key，不能破坏既有 Bearer 访问令牌。
+        with patch('database._generate_mailbox_key', return_value=generated_key):
+            new_key = db_manager.regenerate_mailbox_key(
+                mailbox['address'], mailbox['mailbox_key']
+            )
+
+        refreshed = db_manager.get_mailbox_by_address(mailbox['address'])
+        self.assertEqual(new_key, generated_key)
+        self.assertEqual(refreshed['mailbox_key'], generated_key)
+        self.assertEqual(refreshed['access_token'], mailbox['access_token'])
+
+    def test_existing_uuid_mailbox_key_remains_compatible(self):
+        mailbox = self.create_mailbox('legacy-uuid-key')
+        legacy_key = str(uuid.uuid4())
+        with db_manager.get_connection() as conn:
+            conn.execute(
+                'UPDATE mailboxes SET mailbox_key = ? WHERE address = ?',
+                (legacy_key, mailbox['address']),
+            )
+
+        exchange = self.client.post('/api/get_mailbox_token', json={
+            'address': mailbox['address'],
+            'mailbox_key': legacy_key,
+        })
+        credential = quote(
+            f"{mailbox['address']}----{legacy_key}", safe='----'
+        )
+        self.assertEqual(exchange.status_code, 200)
+        self.assertEqual(exchange.get_json()['access_token'], mailbox['access_token'])
+        self.assertEqual(self.client.get(f'/web/{credential}').status_code, 200)
 
     def test_key_exchange_handles_valid_wrong_expired_and_disabled_mailboxes(self):
         active = self.create_mailbox('active-key')
