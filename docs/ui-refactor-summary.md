@@ -90,16 +90,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_ui.ps1 -Build
 | 桌面与移动端浏览器验收 | 通过；1536px 下顶栏与工作区均为 1240px 且邮箱地址居中，390px 下无横向溢出 |
 | 收件箱 Toast 浏览器验收 | 复制成功提示约 `201 × 46px`，右下角内容自适应，无横向溢出 |
 
-### 生产部署基线（本轮上线前）
+### 生产部署验证（2026-07-20）
 
-- 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；实际部署提交以服务器内 `.deploy-version` 与 `.deploy-commit` 为准；
-- 生产 `.env` 仅存在于服务器且权限为 `600`；Compose 服务 `tempmail` 为 `healthy`，Web 仅绑定 `127.0.0.1:8081`，SMTP 保持公网 `25`；
-- OpenResty 上游使用 `127.0.0.1:8081`，HTTPS 响应包含 HSTS，证书私钥权限已收紧为 `600`，公网无法直连 `8081`；
-- `/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
-- 旧 `/mailbox?address=...&token=...` 与不含 `----` 的 `/web/...` 均返回 `404`；
-- 管理员认证、真实客户端 IP、凭据页禁止缓存响应头与 SMTP 投递到收件箱的端到端链路均已通过在线检查；测试邮箱、邮件和对应审计记录已精确清理；
-- 数据库 `quick_check=ok`；本轮上线前只读快照为 `140` 个邮箱、`97` 封邮件和 `903` 条审计日志，部署时必须重新生成一致性数据库备份并对比上线前后数据；
-- 容器健康检查不保存 HTML 响应体；邮件数据目录权限为 `700`；上一份回滚备份位于 `/root/maildrop-master-backups/20260719-233347-before-e45a113`，本轮部署前不得复用该旧数据快照。
+- 生产入口：`https://tempmail.dearmer.xyz/`；部署目录：`/root/maildrop-master`；功能镜像构建自提交 `70c7013fc66c5b95f10071ade9b667e877b4109d`，最终归档版本以服务器内 `.deploy-version` 与 `.deploy-commit` 为准；
+- 部署前新建一致性回滚备份 `/root/maildrop-master-backups/20260719-234647-before-e45a113`，SQLite 在线备份、源码、生产 `.env`、反代配置和 TLS 私钥均已写入校验清单并通过 `sha256sum -c`；备份根目录、备份目录和数据目录权限均为 `700`；
+- 数据库部署前后均为 `quick_check=ok`、`143` 个邮箱、`112` 封邮件、`906` 条审计日志和 `2` 个子管理员，没有因部署丢失数据；
+- 目标服务器完成 Docker 镜像构建，Compose 服务 `tempmail` 为 `running/healthy`；宿主源码、容器源码和 Git 归档中六个关键文件的 SHA-256 完全一致；
+- 生产 `.env` 与数据库权限为 `600`，邮件数据目录权限为 `700`；Web 仅绑定 `127.0.0.1:8081`，公网直连 `8081` 失败，SMTP `25` 继续绑定 `0.0.0.0`；
+- OpenResty 上游继续使用 `127.0.0.1:8081`；HTTPS 返回 `200` 并包含 HSTS；`/`、`/web`、`/admin`、`/register`、`/api-test` 与本地图标均返回 `200`；
+- 旧 `/mailbox?address=...&token=...` 与不含 `----` 的 `/web/...` 均返回 `404`；容器内连续生成 `200` 个新密钥全部满足 10 位大小写字母和数字规则且无重复；
+- 上线后容器日志未匹配 `error / exception / traceback / critical`，上传归档与校验文件已从服务器清理。
 
 ## 6. 部署步骤
 
