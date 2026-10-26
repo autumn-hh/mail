@@ -744,6 +744,93 @@ def exercise_core(page, base, fixtures, add_message, screenshots):
         page, "#sub-admin-modal", "#sub-admins-view .view-header button"
     )
     checks.append("后台原生导航、真实表格与子管理员弹窗键盘循环")
+    show_surface(page, base, fixtures, "admin-domains")
+    page.locator("#domains-list .domain-checkbox").first.wait_for(
+        state="attached"
+    )
+    assert page.locator("#domains-list .domain-checkbox").count() == 2
+    add_input = page.locator("#domain-add-input")
+    add_submit = page.locator("#domain-add-submit")
+    # 空输入禁用提交；混合分隔符实时计数；服务端逐项裁决格式与重复。
+    assert add_submit.is_disabled(), "空输入时提交按钮应保持禁用"
+    add_input.fill(
+        "alpha.test, beta.test;example.test\nalpha.test.\ngamma..test"
+    )
+    page.wait_for_function(
+        "() => document.getElementById('domain-add"
+        "-count').textContent === '将添加 4 个域名'"
+    )
+    assert not add_submit.is_disabled()
+    add_submit.click()
+    page.wait_for_function(
+        "() => {const p = document.getElementById('domains-result');"
+        "return !p.hidden && p.textContent.includes('已添加 2 个域名')}"
+    )
+    panel_text = page.locator("#domains-result").inner_text()
+    assert "跳过 2 个：" in panel_text, panel_text
+    assert "example.test" in panel_text and "域名已存在" in panel_text, (
+        panel_text
+    )
+    assert "gamma..test" in panel_text and "域名格式不正确" in panel_text, (
+        panel_text
+    )
+    page.wait_for_function(
+        "() => document.querySelectorAll('#domains-list"
+        " .domain-checkbox').length === 4"
+    )
+    remaining = add_input.input_value()
+    assert remaining == "example.test\ngamma..test", remaining
+    checks.append("域名批量添加：混合分隔、实时计数、结果面板与仅清成功项")
+    select_all = page.locator("#domains-select-all")
+    select_all.check()
+    page.locator(
+        '#domains-list .domain-checkbox[value="alpha.test"]'
+    ).uncheck()
+    assert select_all.evaluate("el => el.indeterminate"), (
+        "部分勾选时全选框应呈半选态"
+    )
+    select_all.check()
+    page.wait_for_function(
+        "() => document.getElementById('domains-selecte"
+        "d-summary').textContent === '已选择 4 个域名'"
+    )
+    # 全量删除被后端 409 整体拒绝：列表与勾选保持不变，面板展示原文错误。
+    page.locator("#domains-batch-delete-btn").click()
+    page.locator(".modal [data-action=confirm]").wait_for(state="visible")
+    page.locator(".modal [data-action=confirm]").click()
+    page.wait_for_function(
+        "() => {const p = document.getElementById('domains-result');"
+        "return !p.hidden && p.textContent.includes("
+        "'至少需要保留一个启用的域名')}"
+    )
+    assert page.locator("#domains-list .domain-checkbox").count() == 4
+    assert page.locator(
+        '#domains-list .domain-checkbox:checked'
+    ).count() == 4, "拒绝后勾选应保留"
+    checks.append("批量删除被 409 拒绝时错误展示且列表与勾选不变")
+    select_all.uncheck()
+    for value in ("alpha.test", "beta.test"):
+        page.locator(
+            f'#domains-list .domain-checkbox[value="{value}"]'
+        ).check()
+    delete_button = page.locator("#domains-batch-delete-btn")
+    page.wait_for_function(
+        "() => document.getElementById('domains-batch-d"
+        "elete-btn').textContent.includes('删除所选（2）')"
+    )
+    delete_button.click()
+    page.locator(".modal [data-action=confirm]").wait_for(state="visible")
+    page.locator(".modal [data-action=confirm]").click()
+    page.wait_for_function(
+        "() => {const p = document.getElementById('domains-result');"
+        "return !p.hidden && p.textContent.includes('已删除 2 个域名')}"
+    )
+    page.wait_for_function(
+        "() => document.querySelectorAll('#domains-list"
+        " .domain-checkbox').length === 2"
+    )
+    assert delete_button.is_disabled(), "删除后无勾选应禁用批量按钮"
+    checks.append("批量删除所选成功后刷新列表并清空勾选")
     return checks
 
 

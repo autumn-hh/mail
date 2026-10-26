@@ -691,16 +691,21 @@
                 </div>
 
                 <div class="domains-content">
+                    <!-- 批量添加/删除域名后的持久结果面板；服务端返回的域名与原因由脚本转义后写入。 -->
+                    <div class="domain-result" id="domains-result" role="status" aria-live="polite" hidden></div>
+
                     <!-- 添加域名 -->
                     <div class="security-section domains-add-section">
                         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#plus"></use></svg> 添加域名</h2>
                         <form id="domain-add-form" class="domain-add-form" novalidate>
                             <div class="form-group domain-add-field">
                                 <label for="domain-add-input">域名</label>
-                                <input type="text" id="domain-add-input" placeholder="example.com" maxlength="253" autocomplete="off" spellcheck="false" required>
-                                <small>仅小写字母、数字、连字符与点号，例如 example.com</small>
+                                <textarea id="domain-add-input" rows="3" placeholder="example.com&#10;example.org" maxlength="65535" autocomplete="off" spellcheck="false" required></textarea>
+                                <small>每行一个，也支持逗号、空格或分号分隔，例如 example.com；大写会自动转为小写，中文域名会自动转换</small>
+                                <p class="domain-add-count" id="domain-add-count" aria-live="polite">将添加 0 个域名</p>
+                                <p class="domain-add-limit" id="domain-add-limit" role="alert" hidden>单次最多添加 200 个域名，请分批提交</p>
                             </div>
-                            <button type="submit" class="btn btn-primary" id="domain-add-submit">
+                            <button type="submit" class="btn btn-primary" id="domain-add-submit" disabled>
                                 <svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#plus"></use></svg>
                                 添加域名
                             </button>
@@ -711,10 +716,20 @@
                     <div class="security-section domains-list-section">
                         <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#list"></use></svg> 域名列表</h2>
                         <p class="table-hint">横向滑动查看完整列与操作；键盘可聚焦表格后使用方向键。</p>
+                        <div class="domains-batch-bar">
+                            <span class="domains-selected-summary" id="domains-selected-summary" aria-live="polite">已选择 0 个域名</span>
+                            <button class="btn btn-danger" id="domains-batch-delete-btn" type="button" disabled>
+                                <svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#trash"></use></svg>
+                                删除所选（<span id="domains-batch-delete-count">0</span>）
+                            </button>
+                        </div>
                         <div class="table-container domains-table-container" tabindex="0" role="region" aria-label="域名数据，可横向滚动">
                             <table class="data-table domains-table">
                                 <thead>
                                     <tr>
+                                        <th class="domain-select-heading" aria-label="选择域名">
+                                            <label class="table-select"><input type="checkbox" id="domains-select-all" aria-label="选择全部域名"></label>
+                                        </th>
                                         <th>域名</th>
                                         <th>状态</th>
                                         <th>创建时间</th>
@@ -723,7 +738,7 @@
                                 </thead>
                                 <tbody id="domains-list">
                                     <tr>
-                                        <td colspan="4" class="loading-row">
+                                        <td colspan="5" class="loading-row">
                                             <svg class="icon is-spinning" aria-hidden="true" focusable="false"><use href="/static/icons/maildrop-icons.svg#spinner"></use></svg>
                                             加载中...
                                         </td>

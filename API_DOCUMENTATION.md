@@ -203,6 +203,16 @@ curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
 | `POST` | `/api/admin/domains` | 添加域名，请求体 `{"domain": "example.com"}`，成功返回 `201` |
 | `PUT` | `/api/admin/domains/<domain>` | 启用或禁用，请求体 `{"enabled": true}` |
 | `DELETE` | `/api/admin/domains/<domain>` | 删除域名 |
+| `POST` | `/api/admin/domains/batch-add` | 批量添加，请求体 `{"domains": ["a.com", "b.com"]}` |
+| `POST` | `/api/admin/domains/batch-delete` | 批量删除，请求体同上 |
+
+批量接口每次最多 200 个域名，空白条目会被忽略。
+
+- **批量添加**：部分成功。有效的新域名在同一事务中按输入顺序加入，其余写入 `skipped` 并说明原因（`域名格式不正确`、`重复输入`、`域名已存在`）。
+  返回 `{"success": true, "data": {"added": [域名对象...], "skipped": [{"domain": "...", "reason": "..."}]}}`。
+- **批量删除**：存在的域名在同一事务中删除，不存在的写入 `failed`。如果整批删除后不剩任何启用的域名，整批拒绝并返回 `409`，一个都不删。
+  返回 `{"success": true, "data": {"deleted": ["a.com"], "failed": [{"domain": "...", "reason": "域名不存在"}]}}`。
+- 请求体不是字符串列表或条目全为空返回 `400 domains必须是非空字符串列表`，超过 200 个返回 `400 单次最多处理 200 个域名`。
 
 域名对象格式：`{"domain": "example.com", "enabled": true, "created_at": 1800000000, "updated_at": 1800000000}`。
 域名会先规范化：去掉首尾空白，转成小写，去掉末尾的点，国际化域名转为 Punycode。

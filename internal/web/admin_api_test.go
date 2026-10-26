@@ -845,6 +845,8 @@ func TestAdminAPIAllRoutesRequireAuthentication(t *testing.T) {
 		{"DELETE", "/api/admin/sub-admins/missing"},
 		{"GET", "/api/admin/domains"},
 		{"POST", "/api/admin/domains"},
+		{"POST", "/api/admin/domains/batch-add"},
+		{"POST", "/api/admin/domains/batch-delete"},
 		{"PUT", "/api/admin/domains/example.com"},
 		{"DELETE", "/api/admin/domains/example.com"},
 	} {
@@ -1060,5 +1062,246 @@ func TestAdminAPIAuditLogLimits(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+func TestAdminAPIDomainBatchValidation(t *testing.T) {
+	for _, operation := range []string{"batch-add", "batch-delete"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newAdminTestFixture(t)
+			if err := f.store.SeedDomainsIfEmpty([]string{"keeper.test", "target.test"}); err != nil {
+				t.Fatal(err)
+			}
+			before := f.request(t, "GET", "/api/admin/domains", nil, 200)
+			path := "/api/admin/domains/" + operation
+			for _, tc := range []struct{ name, body string }{
+				{"empty body", ""}, {"whitespace body", " \n\t "}, {"malformed JSON", "{"},
+				{"array body", `[]`}, {"string body", `"example.com"`}, {"number body", `42`},
+				{"boolean body", `true`}, {"null body", `null`}, {"missing domains", `{}`},
+				{"wrong field case", `{"DOMAINS":["target.test"]}`},
+				{"null domains", `{"domains":null}`}, {"string domains", `{"domains":"target.test"}`},
+				{"object domains", `{"domains":{}}`}, {"number domains", `{"domains":42}`},
+				{"boolean domains", `{"domains":false}`}, {"empty domains", `{"domains":[]}`},
+				{"only empty items", `{"domains":[""," ","\t\r\n","\u3000"]}`},
+				{"null item", `{"domains":["target.test",null]}`},
+				{"number item", `{"domains":["target.test",42]}`},
+				{"boolean item", `{"domains":["target.test",false]}`},
+				{"object item", `{"domains":["target.test",{}]}`},
+				{"array item", `{"domains":["target.test",[]]}`},
+				{"trailing JSON", `{"domains":["target.test"]} {}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result := f.raw(t, "POST", path, tc.body, "Bearer "+adminTestPassword, adminTestRemote, "", 400)
+					adminTestEqual(t, result, map[string]any{"success": false, "error": "domains必须是非空字符串列表"})
+				})
+			}
+			values := make([]string, 201)
+			for i := range values {
+				values[i] = "target.test"
+			}
+			result := f.request(t, "POST", path, map[string]any{"domains": values}, 400)
+			adminTestEqual(t, result, map[string]any{"success": false, "error": "单次最多处理 200 个域名"})
+			// 非字符串优先于数量限制，不能在读到第 201 项时提前接受或返回。
+			mixed := make([]any, 202)
+			for i := range mixed {
+				mixed[i] = "target.test"
+			}
+			mixed[len(mixed)-1] = nil
+			result = f.request(t, "POST", path, map[string]any{"domains": mixed}, 400)
+			adminTestEqual(t, result, map[string]any{"success": false, "error": "domains必须是非空字符串列表"})
+			oversized := `{"domains":["` + strings.Repeat("a", 1<<20) + `.test"]}`
+			result = f.raw(t, "POST", path, oversized, "Bearer "+adminTestPassword, adminTestRemote, "", 413)
+			adminTestEqual(t, result, map[string]any{"success": false, "error": "请求体过大"})
+			adminTestEqual(t, f.request(t, "GET", "/api/admin/domains", nil, 200), before)
+			adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 0)
+		})
+	}
+}
+
+func TestAdminAPIDomainBatchAdd(t *testing.T) {
+	f := newAdminTestFixture(t)
+	if _, err := f.store.AddDomain("existing.test"); err != nil {
+		t.Fatal(err)
+	}
+	result := f.request(t, "POST", "/api/admin/domains/batch-add", map[string]any{"domains": []string{
+		"", " \t ", " ZETA.TEST. ", " EXISTING.TEST. ", " invalid ", "zeta.test", " B\u00dcCHER.DE. ", "xn--bcher-kva.de", "alpha.test", "existing.test",
+	}}, 200)
+	adminTestEqual(t, result["success"], true)
+	data := adminTestObject(t, result["data"])
+	added := adminTestArray(t, data["added"])
+	if len(added) != 3 {
+		t.Fatalf("added = %#v", added)
+	}
+	names := []string{"zeta.test", "xn--bcher-kva.de", "alpha.test"}
+	first := adminTestObject(t, added[0])
+	if timestamp, ok := first["created_at"].(float64); !ok || timestamp <= 0 {
+		t.Fatalf("invalid timestamp: %#v", first)
+	}
+	for i, value := range added {
+		adminTestEqual(t, value, map[string]any{
+			"domain": names[i], "enabled": true, "created_at": first["created_at"], "updated_at": first["created_at"],
+		})
+	}
+	adminTestEqual(t, data["skipped"], []any{
+		map[string]any{"domain": "EXISTING.TEST.", "reason": "域名已存在"},
+		map[string]any{"domain": "invalid", "reason": "域名格式不正确"},
+		map[string]any{"domain": "zeta.test", "reason": "重复输入"},
+		map[string]any{"domain": "xn--bcher-kva.de", "reason": "重复输入"},
+		map[string]any{"domain": "existing.test", "reason": "重复输入"},
+	})
+	items := adminTestArray(t, f.request(t, "GET", "/api/admin/domains", nil, 200)["data"])
+	adminTestEqual(t, len(items), 4)
+	adminTestEqual(t, items[1:], added)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 1)
+	log := f.audit(t, "/api/admin/audit-logs", "BATCH_ADD_DOMAINS")
+	adminTestEqual(t, log["mailbox_id"], nil)
+	adminTestEqual(t, log["changes"], map[string]any{"domains": []any{"zeta.test", "xn--bcher-kva.de", "alpha.test"}, "skipped": float64(5)})
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs WHERE mailbox_id IS NULL"), 1)
+	unchanged := adminTestObject(t, f.request(t, "POST", "/api/admin/domains/batch-add", map[string]any{"domains": []string{"existing.test", "bad/domain"}}, 200)["data"])
+	adminTestEqual(t, unchanged["added"], []any{})
+	adminTestEqual(t, len(adminTestArray(t, unchanged["skipped"])), 2)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 1)
+	allAdded := adminTestObject(t, f.request(t, "POST", "/api/admin/domains/batch-add", map[string]any{"domains": []string{"new.test"}}, 200)["data"])
+	adminTestEqual(t, allAdded["skipped"], []any{})
+	adminTestEqual(t, len(adminTestArray(t, allAdded["added"])), 1)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs WHERE action='BATCH_ADD_DOMAINS'"), 2)
+}
+
+func TestAdminAPIDomainBatchDelete(t *testing.T) {
+	f := newAdminTestFixture(t)
+	if err := f.store.SeedDomainsIfEmpty([]string{"keeper.test", "alpha.test", "xn--bcher-kva.de", "disabled.test", "zeta.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SetDomainEnabled("disabled.test", false); err != nil {
+		t.Fatal(err)
+	}
+	result := f.request(t, "POST", "/api/admin/domains/batch-delete", map[string]any{"domains": []string{
+		"", " \t ", " ZETA.TEST. ", " missing.test ", " bad/domain ", "zeta.test", " B\u00dcCHER.DE. ", "MISSING.TEST.", "xn--bcher-kva.de", "alpha.test", "disabled.test",
+	}}, 200)
+	adminTestEqual(t, result, map[string]any{"success": true, "data": map[string]any{
+		"deleted": []any{"zeta.test", "xn--bcher-kva.de", "alpha.test", "disabled.test"},
+		"failed": []any{
+			map[string]any{"domain": " missing.test ", "reason": "域名不存在"},
+			map[string]any{"domain": " bad/domain ", "reason": "域名不存在"},
+		},
+	}})
+	items := adminTestArray(t, f.request(t, "GET", "/api/admin/domains", nil, 200)["data"])
+	if len(items) != 1 {
+		t.Fatalf("remaining domains = %#v", items)
+	}
+	adminTestEqual(t, adminTestObject(t, items[0])["domain"], "keeper.test")
+	adminTestEqual(t, adminTestObject(t, items[0])["enabled"], true)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 1)
+	log := f.audit(t, "/api/admin/audit-logs", "BATCH_DELETE_DOMAINS")
+	adminTestEqual(t, log["mailbox_id"], nil)
+	adminTestEqual(t, log["changes"], map[string]any{"domains": []any{"zeta.test", "xn--bcher-kva.de", "alpha.test", "disabled.test"}, "failed": float64(2)})
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs WHERE mailbox_id IS NULL"), 1)
+	unchanged := adminTestObject(t, f.request(t, "POST", "/api/admin/domains/batch-delete", map[string]any{"domains": []string{"missing.test", "MISSING.TEST.", "invalid"}}, 200)["data"])
+	adminTestEqual(t, unchanged["deleted"], []any{})
+	adminTestEqual(t, len(adminTestArray(t, unchanged["failed"])), 2)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 1)
+	if _, err := f.store.AddDomain("fresh.test"); err != nil {
+		t.Fatal(err)
+	}
+	allDeleted := f.request(t, "POST", "/api/admin/domains/batch-delete", map[string]any{"domains": []string{"fresh.test", " FRESH.TEST. "}}, 200)
+	adminTestEqual(t, allDeleted, map[string]any{"success": true, "data": map[string]any{"deleted": []any{"fresh.test"}, "failed": []any{}}})
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs WHERE action='BATCH_DELETE_DOMAINS'"), 2)
+}
+
+func TestAdminAPIDomainBatchDeleteGuardAndSingleRoutes(t *testing.T) {
+	f := newAdminTestFixture(t)
+	if err := f.store.SeedDomainsIfEmpty([]string{"first.test", "second.test", "disabled.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SetDomainEnabled("disabled.test", false); err != nil {
+		t.Fatal(err)
+	}
+	before := f.request(t, "GET", "/api/admin/domains", nil, 200)
+	result := f.request(t, "POST", "/api/admin/domains/batch-delete", map[string]any{"domains": []string{
+		"disabled.test", "first.test", "missing.test", "second.test", "FIRST.TEST.",
+	}}, 409)
+	adminTestEqual(t, result, map[string]any{"success": false, "error": "至少需要保留一个启用的域名"})
+	adminTestEqual(t, f.request(t, "GET", "/api/admin/domains", nil, 200), before)
+	adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 0)
+	// 字面批量路由不能影响原有单域名更新、删除和创建。
+	updated := adminTestObject(t, f.request(t, "PUT", "/api/admin/domains/SECOND.TEST.", map[string]any{"enabled": false}, 200)["data"])
+	adminTestEqual(t, updated["domain"], "second.test")
+	adminTestEqual(t, updated["enabled"], false)
+	adminTestEqual(t, f.request(t, "DELETE", "/api/admin/domains/SECOND.TEST.", nil, 200), map[string]any{"success": true})
+	created := adminTestObject(t, f.request(t, "POST", "/api/admin/domains", map[string]any{"domain": "single.test"}, 201)["data"])
+	adminTestEqual(t, created["domain"], "single.test")
+	adminTestEqual(t, created["enabled"], true)
+	for _, literal := range []string{"batch-add", "batch-delete"} {
+		adminTestError(t, f.request(t, "PUT", "/api/admin/domains/"+literal, map[string]any{"enabled": false}, 404), "域名不存在")
+		adminTestError(t, f.request(t, "DELETE", "/api/admin/domains/"+literal, nil, 404), "域名不存在")
+	}
+}
+
+func TestAdminAPIDomainBatchTwoHundredNonemptyItems(t *testing.T) {
+	for _, operation := range []string{"batch-add", "batch-delete"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newAdminTestFixture(t)
+			if _, err := f.store.AddDomain("keeper.test"); err != nil {
+				t.Fatal(err)
+			}
+			values := make([]string, 0, 202)
+			values = append(values, "", " \t\u3000 ")
+			for i := range 200 {
+				value := fmt.Sprintf("domain-%03d.test", i)
+				values = append(values, value)
+				if operation == "batch-delete" {
+					if _, err := f.store.AddDomain(value); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			result := f.request(t, "POST", "/api/admin/domains/"+operation, map[string]any{"domains": values}, 200)
+			adminTestEqual(t, result["success"], true)
+			data := adminTestObject(t, result["data"])
+			changedKey, failedKey := "added", "skipped"
+			if operation == "batch-delete" {
+				changedKey, failedKey = "deleted", "failed"
+			}
+			changes := adminTestArray(t, data[changedKey])
+			if len(changes) != 200 {
+				t.Fatalf("%s count = %d", changedKey, len(changes))
+			}
+			for i, value := range changes {
+				if operation == "batch-add" {
+					value = adminTestObject(t, value)["domain"]
+				}
+				adminTestEqual(t, value, values[i+2])
+			}
+			adminTestEqual(t, data[failedKey], []any{})
+			adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 1)
+		})
+	}
+}
+
+func TestAdminAPIDomainBatchDatabaseErrorRollsBack(t *testing.T) {
+	for _, operation := range []string{"batch-add", "batch-delete"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newAdminTestFixture(t)
+			values := []string{"first.test", "reject.test", "last.test"}
+			if err := f.store.SeedDomainsIfEmpty([]string{"keeper.test"}); err != nil {
+				t.Fatal(err)
+			}
+			trigger := `CREATE TRIGGER reject_domain_batch BEFORE INSERT ON domains
+				WHEN NEW.domain = 'reject.test' BEGIN SELECT RAISE(ABORT, 'insert unavailable'); END`
+			if operation == "batch-delete" {
+				for _, value := range values {
+					if _, err := f.store.AddDomain(value); err != nil {
+						t.Fatal(err)
+					}
+				}
+				trigger = `CREATE TRIGGER reject_domain_batch BEFORE DELETE ON domains
+					WHEN OLD.domain = 'reject.test' BEGIN SELECT RAISE(ABORT, 'delete unavailable'); END`
+			}
+			before := f.request(t, "GET", "/api/admin/domains", nil, 200)
+			f.exec(t, trigger)
+			result := f.request(t, "POST", "/api/admin/domains/"+operation, map[string]any{"domains": values}, 500)
+			adminTestError(t, result, "")
+			adminTestEqual(t, f.request(t, "GET", "/api/admin/domains", nil, 200), before)
+			adminTestEqual(t, f.count(t, "SELECT COUNT(*) FROM audit_logs"), 0)
+		})
 	}
 }

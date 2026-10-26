@@ -11,6 +11,11 @@ import (
 	"modernc.org/sqlite"
 )
 
+type DomainSkip struct {
+	Domain string `json:"domain"`
+	Reason string `json:"reason"`
+}
+
 func NormalizeDomain(value string) (string, error) {
 	value = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
 	ascii, err := idna.Lookup.ToASCII(value)
@@ -77,6 +82,98 @@ func (s *Store) AddDomain(value string) (*Domain, error) {
 		return nil, err
 	}
 	return &Domain{Domain: domain, Enabled: true, CreatedAt: now, UpdatedAt: now}, nil
+}
+func (s *Store) AddDomains(values []string) ([]Domain, []DomainSkip, error) {
+	added := []Domain{}
+	skipped := []DomainSkip{}
+	now := s.now().Unix()
+	err := s.WithTx(context.Background(), func(tx *sql.Tx) error {
+		seen := map[string]bool{}
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			domain, err := NormalizeDomain(value)
+			if err != nil {
+				skipped = append(skipped, DomainSkip{Domain: value, Reason: "域名格式不正确"})
+				continue
+			}
+			if seen[domain] {
+				skipped = append(skipped, DomainSkip{Domain: value, Reason: "重复输入"})
+				continue
+			}
+			seen[domain] = true
+			var exists int
+			err = tx.QueryRow("SELECT 1 FROM domains WHERE domain = ?", domain).Scan(&exists)
+			if err == nil {
+				skipped = append(skipped, DomainSkip{Domain: value, Reason: "域名已存在"})
+				continue
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if _, err := tx.Exec("INSERT INTO domains (domain, enabled, created_at, updated_at) VALUES (?, 1, ?, ?)", domain, now, now); err != nil {
+				return err
+			}
+			added = append(added, Domain{Domain: domain, Enabled: true, CreatedAt: now, UpdatedAt: now})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return added, skipped, nil
+}
+
+func (s *Store) DeleteDomains(values []string) ([]string, []DomainSkip, error) {
+	deleted := []string{}
+	failed := []DomainSkip{}
+	err := s.WithTx(context.Background(), func(tx *sql.Tx) error {
+		seen := map[string]bool{}
+		enabledToDelete := 0
+		for _, value := range values {
+			domain, err := NormalizeDomain(value)
+			if err != nil {
+				failed = append(failed, DomainSkip{Domain: value, Reason: "域名不存在"})
+				continue
+			}
+			if seen[domain] {
+				continue
+			}
+			seen[domain] = true
+			var enabled bool
+			err = tx.QueryRow("SELECT enabled FROM domains WHERE domain = ?", domain).Scan(&enabled)
+			if errors.Is(err, sql.ErrNoRows) {
+				failed = append(failed, DomainSkip{Domain: value, Reason: "域名不存在"})
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			deleted = append(deleted, domain)
+			if enabled {
+				enabledToDelete++
+			}
+		}
+		if len(deleted) == 0 {
+			return nil
+		}
+		var enabledCount int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM domains WHERE enabled = 1").Scan(&enabledCount); err != nil {
+			return err
+		}
+		if enabledCount <= enabledToDelete {
+			return ErrLastEnabledDomain
+		}
+		for _, domain := range deleted {
+			if _, err := tx.Exec("DELETE FROM domains WHERE domain = ?", domain); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return deleted, failed, nil
 }
 func (s *Store) changeDomain(value string, enabled bool, remove bool) error {
 	domain, err := NormalizeDomain(value)

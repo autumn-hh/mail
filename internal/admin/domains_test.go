@@ -222,3 +222,121 @@ func TestDomainServiceAuditFailureLeavesCommittedChange(t *testing.T) {
 		})
 	}
 }
+func TestDomainServiceBatchesAuditOncePerChange(t *testing.T) {
+	svc, db := newDomainTestService(t)
+	ctx := context.Background()
+	actor := admin.Actor{User: "domain-admin", IP: "192.0.2.13"}
+	if _, err := db.AddDomain("keeper.test"); err != nil {
+		t.Fatal(err)
+	}
+	added, skipped, err := svc.AddDomains(ctx, []string{" A.TEST. ", "keeper.test", "invalid", "a.test", "B\u00dcCHER.DE."}, actor)
+	if err != nil || len(added) != 2 || added[0].Domain != "a.test" || added[1].Domain != "xn--bcher-kva.de" || len(skipped) != 3 {
+		t.Fatalf("batch add = %#v, %#v, %v", added, skipped, err)
+	}
+	added, skipped, err = svc.AddDomains(ctx, []string{"a.test", "invalid"}, actor)
+	if err != nil || added == nil || len(added) != 0 || len(skipped) != 2 {
+		t.Fatalf("unchanged add = %#v, %#v, %v", added, skipped, err)
+	}
+	before, err := svc.ListDomains()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.DeleteDomains(ctx, []string{"keeper.test", "a.test", "xn--bcher-kva.de"}, actor); !errors.Is(err, store.ErrLastEnabledDomain) {
+		t.Fatalf("batch guard = %v", err)
+	}
+	after, err := svc.ListDomains()
+	if err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("guard changed domains = %#v, %v", after, err)
+	}
+	deleted, failed, err := svc.DeleteDomains(ctx, []string{"missing.test", "B\u00dcCHER.DE.", "a.test", "A.TEST.", "invalid"}, actor)
+	if err != nil || !reflect.DeepEqual(deleted, []string{"xn--bcher-kva.de", "a.test"}) || len(failed) != 2 {
+		t.Fatalf("batch delete = %#v, %#v, %v", deleted, failed, err)
+	}
+	deleted, failed, err = svc.DeleteDomains(ctx, []string{"missing.test"}, actor)
+	if err != nil || deleted == nil || len(deleted) != 0 || len(failed) != 1 {
+		t.Fatalf("unchanged delete = %#v, %#v, %v", deleted, failed, err)
+	}
+	assertDomainAudits(t, db, actor, []domainAuditExpectation{
+		{"BATCH_ADD_DOMAINS", map[string]any{"domains": []any{"a.test", "xn--bcher-kva.de"}, "skipped": float64(3)}},
+		{"BATCH_DELETE_DOMAINS", map[string]any{"domains": []any{"xn--bcher-kva.de", "a.test"}, "failed": float64(2)}},
+	})
+}
+
+func TestDomainServiceBatchAuditFailureLeavesCommittedChanges(t *testing.T) {
+	for _, operation := range []string{"add", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			svc, db := newDomainTestService(t)
+			if err := db.SeedDomainsIfEmpty([]string{"keeper.test", "first.test", "second.test"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.DB().Exec(`CREATE TRIGGER reject_batch_domain_audit BEFORE INSERT ON audit_logs
+				BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			actor := admin.Actor{User: "domain-admin", IP: "192.0.2.14"}
+			var err error
+			want := []string{"keeper.test"}
+			if operation == "add" {
+				_, _, err = svc.AddDomains(ctx, []string{"third.test", "fourth.test"}, actor)
+				want = []string{"keeper.test", "first.test", "second.test", "third.test", "fourth.test"}
+			} else {
+				_, _, err = svc.DeleteDomains(ctx, []string{"first.test", "second.test"}, actor)
+			}
+			if err == nil {
+				t.Fatal("audit failure was not returned")
+			}
+			domains, err := svc.ListDomains()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, domain := range domains {
+				got = append(got, domain.Domain)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("committed domains = %v, want %v", got, want)
+			}
+			assertDomainAudits(t, db, actor, nil)
+		})
+	}
+}
+
+func TestDomainServiceBatchStoreErrorDoesNotAudit(t *testing.T) {
+	for _, operation := range []string{"add", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			svc, db := newDomainTestService(t)
+			if err := db.SeedDomainsIfEmpty([]string{"keeper.test", "first.test", "reject.test"}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := svc.ListDomains()
+			if err != nil {
+				t.Fatal(err)
+			}
+			trigger := `CREATE TRIGGER reject_domain_batch BEFORE DELETE ON domains
+				WHEN OLD.domain = 'reject.test' BEGIN SELECT RAISE(ABORT, 'delete unavailable'); END`
+			if operation == "add" {
+				trigger = `CREATE TRIGGER reject_domain_batch BEFORE INSERT ON domains
+					WHEN NEW.domain = 'new-reject.test' BEGIN SELECT RAISE(ABORT, 'insert unavailable'); END`
+			}
+			if _, err := db.DB().Exec(trigger); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			actor := admin.Actor{User: "domain-admin", IP: "192.0.2.15"}
+			if operation == "add" {
+				_, _, err = svc.AddDomains(ctx, []string{"new-first.test", "new-reject.test"}, actor)
+			} else {
+				_, _, err = svc.DeleteDomains(ctx, []string{"first.test", "reject.test"}, actor)
+			}
+			if err == nil {
+				t.Fatal("database failure was not returned")
+			}
+			after, err := svc.ListDomains()
+			if err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed batch changed domains = %#v, %v", after, err)
+			}
+			assertDomainAudits(t, db, actor, nil)
+		})
+	}
+}

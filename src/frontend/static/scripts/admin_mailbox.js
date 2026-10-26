@@ -16,6 +16,15 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+// 把国际化域名转换为与服务端一致的 Punycode 形式；无法解析时原样返回。
+function toAsciiDomain(domain) {
+    try {
+        return new URL(`http://${domain}`).hostname;
+    } catch (error) {
+        return domain;
+    }
+}
+
 // 仅允许安全字符进入 CSS 类名，避免审计操作名等外部字段突破 class 属性。
 function safeCssToken(value, fallback = 'unknown') {
     const token = String(value ?? '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
@@ -107,6 +116,9 @@ class AdminMailboxManager {
         this.availableDomains = [];
         this.batchAddresses = [];
         this.batchPlanSignature = '';
+
+        // 域名批量删除的勾选集跨刷新保留，渲染时按现存域名裁剪。
+        this.selectedDomains = new Set();
 
         this.init();
     }
@@ -270,6 +282,20 @@ class AdminMailboxManager {
         if (domainAddForm) {
             domainAddForm.addEventListener('submit', (e) => this.handleDomainAdd(e));
         }
+        const domainAddInput = document.getElementById('domain-add-input');
+        if (domainAddInput) {
+            domainAddInput.addEventListener('input', () => this.updateDomainAddCount());
+        }
+        const domainSelectAll = document.getElementById('domains-select-all');
+        if (domainSelectAll) {
+            domainSelectAll.addEventListener('change', () => this.toggleDomainSelectAll(domainSelectAll.checked));
+        }
+        const domainsBatchDeleteBtn = document.getElementById('domains-batch-delete-btn');
+        if (domainsBatchDeleteBtn) {
+            domainsBatchDeleteBtn.addEventListener('click', () => this.deleteSelectedDomains(domainsBatchDeleteBtn));
+        }
+        this.updateDomainAddCount();
+        this.updateDomainSelectionUi();
         const domainsRefreshBtn = document.getElementById('domains-refresh-btn');
         if (domainsRefreshBtn) {
             domainsRefreshBtn.addEventListener('click', () => this.loadDomainSettings());
@@ -358,11 +384,6 @@ class AdminMailboxManager {
         }
     }
 
-    isValidDomainName(domain) {
-        // 客户端只做基础主机名形状检查，权威性校验以后端为准。
-        return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(domain);
-    }
-
     async domainRequest(url, options = {}) {
         // 域名接口由 Go 后端提供；当前 Flask 未实现时返回 HTML 错误页而非 JSON。
         // 非 JSON 失败统一给出中文兜底，不把解析异常暴露给管理员。
@@ -379,14 +400,14 @@ class AdminMailboxManager {
     async loadDomainSettings() {
         const tbody = document.getElementById('domains-list');
         if (!tbody) return;
-        tbody.innerHTML = `<tr><td colspan="4" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
 
         try {
             const response = await this.domainRequest('/api/admin/domains');
             this.renderDomainList(response.data);
         } catch (error) {
             console.error('加载域名列表失败:', error);
-            tbody.innerHTML = '<tr><td colspan="4" class="error-row">加载失败，请稍后重试</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="error-row">加载失败，请稍后重试</td></tr>';
             this.showToast('error', error.message || '加载域名列表失败');
         }
     }
@@ -396,16 +417,26 @@ class AdminMailboxManager {
         if (!tbody) return;
         const rows = Array.isArray(domains) ? domains : [];
 
+        // 每次刷新都把勾选裁剪到仍存在的域名，避免刚删除的项留在批量删除集里。
+        const existing = new Set(rows.map(item => String(item.domain ?? '')).filter(Boolean));
+        this.selectedDomains = new Set([...this.selectedDomains].filter(domain => existing.has(domain)));
+
         if (rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="empty-row">暂无域名，请先添加</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-row">暂无域名，请先添加</td></tr>';
             tbody.onclick = null;
+            tbody.onchange = null;
+            this.updateDomainSelectionUi();
             return;
         }
 
         tbody.innerHTML = rows.map((item, index) => {
             const enabled = Boolean(item.enabled);
+            const selected = this.selectedDomains.has(String(item.domain ?? ''));
             return `
                 <tr>
+                    <td class="domain-select-cell">
+                        <label class="table-select"><input type="checkbox" class="domain-checkbox" value="${escapeHtml(item.domain)}" aria-label="选择域名 ${escapeHtml(item.domain)}"${selected ? ' checked' : ''}></label>
+                    </td>
                     <td data-label="域名"><span class="domain-name">${escapeHtml(item.domain)}</span></td>
                     <td data-label="状态"><span class="status-badge ${enabled ? 'active' : 'disabled'}">${enabled ? '已启用' : '已禁用'}</span></td>
                     <td data-label="创建时间">${escapeHtml(this.formatDomainTime(item.created_at))}</td>
@@ -437,40 +468,230 @@ class AdminMailboxManager {
                 this.deleteDomain(item.domain, button);
             }
         };
+        // 勾选变化走 change 委托，键盘切换与鼠标点击走同一条路径。
+        tbody.onchange = (event) => {
+            const checkbox = event.target.closest('input.domain-checkbox');
+            if (!checkbox || !tbody.contains(checkbox)) return;
+            this.setDomainSelected(checkbox.value, checkbox.checked);
+        };
+        this.updateDomainSelectionUi();
+    }
+
+    setDomainSelected(domain, selected) {
+        const value = String(domain ?? '');
+        if (!value) return;
+        if (selected) {
+            this.selectedDomains.add(value);
+        } else {
+            this.selectedDomains.delete(value);
+        }
+        this.updateDomainSelectionUi();
+    }
+
+    toggleDomainSelectAll(checked) {
+        // 表头全选只作用于当前渲染行，勾选集仍按域名原值维护。
+        const checkboxes = document.querySelectorAll('#domains-list .domain-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = checked;
+            if (checked) {
+                this.selectedDomains.add(cb.value);
+            } else {
+                this.selectedDomains.delete(cb.value);
+            }
+        });
+        this.updateDomainSelectionUi();
+    }
+
+    updateDomainSelectionUi() {
+        const count = this.selectedDomains.size;
+        const selectAll = document.getElementById('domains-select-all');
+        const rowCount = document.querySelectorAll('#domains-list .domain-checkbox').length;
+        if (selectAll) {
+            selectAll.disabled = rowCount === 0;
+            selectAll.checked = rowCount > 0 && count === rowCount;
+            selectAll.indeterminate = count > 0 && count < rowCount;
+        }
+        const summary = document.getElementById('domains-selected-summary');
+        if (summary) {
+            summary.textContent = `已选择 ${count} 个域名`;
+        }
+        const countEl = document.getElementById('domains-batch-delete-count');
+        if (countEl) {
+            countEl.textContent = String(count);
+        }
+        const deleteButton = document.getElementById('domains-batch-delete-btn');
+        if (deleteButton) {
+            deleteButton.disabled = count === 0;
+        }
+    }
+
+    parseDomainEntries(raw) {
+        // 换行、逗号、分号与空白都视为分隔符；提交前统一小写、去尾点并去重。
+        const seen = new Set();
+        const entries = [];
+        String(raw ?? '').split(/[\s,;，；]+/u).forEach(piece => {
+            const normalized = piece.trim().toLowerCase().replace(/\.$/, '');
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            entries.push(normalized);
+        });
+        return entries;
+    }
+
+    updateDomainAddCount() {
+        const input = document.getElementById('domain-add-input');
+        if (!input) return;
+        const count = this.parseDomainEntries(input.value).length;
+        const countEl = document.getElementById('domain-add-count');
+        if (countEl) {
+            countEl.textContent = `将添加 ${count} 个域名`;
+        }
+        // 超过后端上限时在表单内联提示，并锁定提交避免必然失败请求。
+        const limitEl = document.getElementById('domain-add-limit');
+        if (limitEl) {
+            limitEl.hidden = count <= 200;
+        }
+        const submitButton = document.getElementById('domain-add-submit');
+        if (submitButton) {
+            submitButton.disabled = count === 0 || count > 200;
+        }
     }
 
     async handleDomainAdd(event) {
         event.preventDefault();
         const input = document.getElementById('domain-add-input');
         const submitButton = document.getElementById('domain-add-submit');
-        const domain = (input.value || '').trim().toLowerCase();
+        const domains = this.parseDomainEntries(input.value);
 
-        if (!domain) {
+        if (domains.length === 0) {
             this.showToast('error', '请输入域名');
             input.focus();
             return;
         }
-        if (!this.isValidDomainName(domain)) {
-            this.showToast('error', '域名格式不正确，请检查后重试');
+        if (domains.length > 200) {
+            this.showToast('error', '单次最多添加 200 个域名，请分批提交');
             input.focus();
             return;
         }
 
         MaildropUI.setBusy(submitButton, true, '添加中...');
         try {
-            await this.domainRequest('/api/admin/domains', {
+            // 一律走批量接口，单个域名也是长度为 1 的批量。
+            const response = await this.domainRequest('/api/admin/domains/batch-add', {
                 method: 'POST',
-                body: JSON.stringify({ domain })
+                body: JSON.stringify({ domains })
             });
-            this.showToast('success', `域名 ${domain} 已添加`);
-            input.value = '';
-            await this.refreshDomainData();
+            const data = response.data || {};
+            const added = Array.isArray(data.added) ? data.added : [];
+            const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+            this.renderDomainResult({ type: 'add', added, skipped });
+            this.showToast(
+                added.length > 0 ? 'success' : 'warning',
+                skipped.length > 0 ? `已添加 ${added.length} 个域名，跳过 ${skipped.length} 个` : `已添加 ${added.length} 个域名`
+            );
+            // 只移除实际添加成功的域名，被跳过的留在输入框里便于管理员修正。
+            const addedSet = new Set(added.map(item => String(item.domain ?? '')));
+            // 服务端把中文等国际化域名规范为 Punycode，比较前用 URL 解析转换成同样的 ASCII 形式。
+            input.value = domains.filter(domain => !addedSet.has(toAsciiDomain(domain))).join('\n');
+            if (added.length > 0) {
+                await this.refreshDomainData();
+            }
         } catch (error) {
             console.error('添加域名失败:', error);
             this.showToast('error', error.message || '添加域名失败');
+            this.renderDomainResult({ type: 'error', message: error.message || '添加域名失败' });
         } finally {
             MaildropUI.setBusy(submitButton, false);
+            this.updateDomainAddCount();
         }
+    }
+
+    async deleteSelectedDomains(opener = document.activeElement) {
+        const selected = [...this.selectedDomains];
+        if (selected.length === 0) {
+            this.showToast('warning', '请先选择要删除的域名');
+            return;
+        }
+
+        // 确认弹窗最多列 10 个域名，更多时折叠为「等 N 个」。
+        const preview = selected.slice(0, 10).join('、');
+        const suffix = selected.length > 10 ? ` 等 ${selected.length} 个` : '';
+        if (!await confirmAdminAction({
+            title: '批量删除域名',
+            message: `确定要删除选中的 ${selected.length} 个域名（${preview}${suffix}）吗？删除后新邮箱将无法使用这些域名。`,
+            confirmLabel: '确认删除',
+            danger: true,
+            opener,
+        })) {
+            return;
+        }
+
+        const deleteButton = document.getElementById('domains-batch-delete-btn');
+        MaildropUI.setBusy(deleteButton, true, '删除中...');
+        try {
+            const response = await this.domainRequest('/api/admin/domains/batch-delete', {
+                method: 'POST',
+                body: JSON.stringify({ domains: selected })
+            });
+            const data = response.data || {};
+            const deleted = Array.isArray(data.deleted) ? data.deleted : [];
+            const failed = Array.isArray(data.failed) ? data.failed : [];
+            this.renderDomainResult({ type: 'delete', deleted, failed });
+            this.showToast(
+                failed.length > 0 ? 'warning' : 'success',
+                failed.length > 0 ? `已删除 ${deleted.length} 个域名，${failed.length} 个失败` : `已删除 ${deleted.length} 个域名`
+            );
+            deleted.forEach(domain => this.selectedDomains.delete(String(domain)));
+            await this.refreshDomainData();
+        } catch (error) {
+            // 后端整体拒绝（如保留至少一个启用域名）时原样展示错误，列表与勾选保持不变。
+            console.error('批量删除域名失败:', error);
+            this.showToast('error', error.message || '批量删除域名失败');
+            this.renderDomainResult({ type: 'error', message: error.message || '批量删除域名失败' });
+        } finally {
+            MaildropUI.setBusy(deleteButton, false);
+            this.updateDomainSelectionUi();
+        }
+    }
+
+    renderDomainResult(result) {
+        // 结果面板常驻视图内，可手动关闭；服务端域名与原因统一转义后渲染。
+        const panel = document.getElementById('domains-result');
+        if (!panel) return;
+        let body = '';
+        if (result.type === 'add') {
+            const added = Array.isArray(result.added) ? result.added : [];
+            const skipped = Array.isArray(result.skipped) ? result.skipped : [];
+            panel.className = `domain-result is-${skipped.length > 0 ? 'warning' : 'success'}`;
+            body = `<p class="domain-result-title">${uiIcon(skipped.length > 0 ? 'alert-triangle' : 'check-circle')} 已添加 ${added.length} 个域名</p>`;
+            if (skipped.length > 0) {
+                body += `<p class="domain-result-subtitle">跳过 ${skipped.length} 个：</p><ul class="domain-result-list">`
+                    + skipped.map(item => `<li><code>${escapeHtml(item.domain)}</code><span class="domain-result-reason">${escapeHtml(item.reason)}</span></li>`).join('')
+                    + '</ul>';
+            }
+        } else if (result.type === 'delete') {
+            const deleted = Array.isArray(result.deleted) ? result.deleted : [];
+            const failed = Array.isArray(result.failed) ? result.failed : [];
+            panel.className = `domain-result is-${failed.length > 0 ? 'warning' : 'success'}`;
+            body = `<p class="domain-result-title">${uiIcon(failed.length > 0 ? 'alert-triangle' : 'check-circle')} 已删除 ${deleted.length} 个域名</p>`;
+            if (failed.length > 0) {
+                body += `<p class="domain-result-subtitle">失败 ${failed.length} 个：</p><ul class="domain-result-list">`
+                    + failed.map(item => `<li><code>${escapeHtml(item.domain)}</code><span class="domain-result-reason">${escapeHtml(item.reason)}</span></li>`).join('')
+                    + '</ul>';
+            }
+        } else {
+            panel.className = 'domain-result is-error';
+            body = `<p class="domain-result-title">${uiIcon('alert-circle')} ${escapeHtml(result.message)}</p>`;
+        }
+        panel.innerHTML = `
+            <div class="domain-result-body">${body}</div>
+            <button class="btn-icon domain-result-close" type="button" title="关闭结果提示" aria-label="关闭结果提示">${uiIcon('close')}</button>
+        `;
+        panel.hidden = false;
+        panel.querySelector('.domain-result-close').addEventListener('click', () => {
+            panel.hidden = true;
+            panel.replaceChildren();
+        });
     }
 
     async setDomainEnabled(domain, enabled, opener) {

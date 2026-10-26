@@ -52,6 +52,8 @@ func (s *Server) registerAdminAPI() {
 		{"DELETE /api/admin/sub-admins/{id}", api.deleteSubAdmin},
 		{"GET /api/admin/domains", api.domains},
 		{"POST /api/admin/domains", api.addDomain},
+		{"POST /api/admin/domains/batch-add", api.batchAddDomains},
+		{"POST /api/admin/domains/batch-delete", api.batchDeleteDomains},
 		{"PUT /api/admin/domains/{domain}", api.updateDomain},
 		{"DELETE /api/admin/domains/{domain}", api.deleteDomain},
 	}
@@ -514,4 +516,63 @@ func (a *adminAPI) deleteDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"success": true})
+}
+func adminBatchDomains(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	var data map[string]any
+	ok, err := readJSON(w, r, &data)
+	if errors.Is(err, errBodyTooLarge) {
+		adminError(w, http.StatusRequestEntityTooLarge, "请求体过大")
+		return nil, false
+	}
+	items, isList := data["domains"].([]any)
+	if !ok || err != nil || !isList {
+		adminError(w, http.StatusBadRequest, "domains必须是非空字符串列表")
+		return nil, false
+	}
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		value, isString := item.(string)
+		if !isString {
+			adminError(w, http.StatusBadRequest, "domains必须是非空字符串列表")
+			return nil, false
+		}
+		if strings.TrimSpace(value) != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) == 0 {
+		adminError(w, http.StatusBadRequest, "domains必须是非空字符串列表")
+		return nil, false
+	}
+	if len(values) > 200 {
+		adminError(w, http.StatusBadRequest, "单次最多处理 200 个域名")
+		return nil, false
+	}
+	return values, true
+}
+
+func (a *adminAPI) batchAddDomains(w http.ResponseWriter, r *http.Request) {
+	values, ok := adminBatchDomains(w, r)
+	if !ok {
+		return
+	}
+	added, skipped, err := a.service.AddDomains(r.Context(), values, a.actor(r))
+	if err != nil {
+		a.domainError(w, r, err)
+		return
+	}
+	adminData(w, map[string]any{"added": added, "skipped": skipped})
+}
+
+func (a *adminAPI) batchDeleteDomains(w http.ResponseWriter, r *http.Request) {
+	values, ok := adminBatchDomains(w, r)
+	if !ok {
+		return
+	}
+	deleted, failed, err := a.service.DeleteDomains(r.Context(), values, a.actor(r))
+	if err != nil {
+		a.domainError(w, r, err)
+		return
+	}
+	adminData(w, map[string]any{"deleted": deleted, "failed": failed})
 }

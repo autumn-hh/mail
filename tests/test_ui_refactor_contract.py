@@ -195,6 +195,8 @@ class UiRefactorContractTest(unittest.TestCase):
             '/api/admin/sub-admins',
             '/api/admin/blocked-ips',
             '/api/admin/domains',
+            '/api/admin/domains/batch-add',
+            '/api/admin/domains/batch-delete',
         ):
             with self.subTest(endpoint=endpoint):
                 self.assertIn(endpoint, admin_script)

@@ -1896,12 +1896,65 @@ code {
 .table-hint { display: none; }
 @media (max-width: 820px) { .table-hint { display: block; margin: 0 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.7; } }
 
-/* 域名设置：沿用现有分区卡片，列表按四列数据收敛最小宽度。 */
-.domains-table { min-width: 640px; }
+/* 域名设置：沿用现有分区卡片，列表按数据列收敛最小宽度。 */
+.domains-table { min-width: 700px; }
 .domain-name { font-family: var(--font-mono); font-size: 0.85rem; }
 .domain-add-form { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
 .domain-add-field { flex: 1 1 260px; margin-bottom: 0; }
 .domain-add-form .btn { flex: 0 0 auto; }
+.domain-add-field textarea { font-family: var(--font-mono); line-height: 1.6; }
+
+/* 批量添加实时计数与超上限提示放在表单内，提交前管理员即可看到结果。 */
+.domain-add-count { margin: 7px 0 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; }
+.domain-add-limit { margin: 7px 0 0; color: var(--warning); font-size: 0.78rem; line-height: 1.5; font-weight: 700; }
+
+/* 批量操作结果面板常驻到手动关闭，状态色区分成功、部分跳过与整体失败。 */
+.domain-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    border: 1px solid color-mix(in srgb, var(--success) 34%, transparent);
+    border-radius: var(--radius-md);
+    color: var(--success);
+    background: var(--success-soft);
+}
+.domain-result[hidden] { display: none; }
+.domain-result.is-warning {
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+    color: var(--warning);
+    background: var(--warning-soft);
+}
+.domain-result.is-error {
+    border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+.domain-result-body { flex: 1 1 auto; min-width: 0; display: grid; gap: 8px; color: var(--text); }
+.domain-result-title { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 700; }
+.domain-result-title .icon { width: 18px; height: 18px; flex: 0 0 auto; }
+.domain-result-subtitle { margin: 0; color: var(--text-muted); font-size: 0.78rem; font-weight: 700; }
+.domain-result-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0 0 0 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+.domain-result-list li { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.domain-result-list code { font-family: var(--font-mono); font-size: 0.85rem; word-break: break-all; }
+.domain-result-reason { color: var(--text-muted); font-size: 0.78rem; }
+.domain-result-close { flex: 0 0 auto; }
+
+/* 批量删除工具条：计数文本与危险操作保持相邻，窄屏自动折行。 */
+.domains-batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.domains-selected-summary { color: var(--text-muted); font-size: 0.82rem; }
+.domain-select-heading { width: 52px; }
+.domain-checkbox { cursor: pointer; }
 
 /* 启停开关保持 44px 触控区域，内部轨道只表达状态。 */
 .domain-switch-track {

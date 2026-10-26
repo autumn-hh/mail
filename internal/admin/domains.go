@@ -60,3 +60,36 @@ func (s *Service) DeleteDomain(ctx context.Context, value string, actor Actor) e
 	}
 	return s.LogAudit(ctx, "DELETE_DOMAIN", nil, map[string]any{"domain": value}, actor)
 }
+func (s *Service) AddDomains(ctx context.Context, values []string, actor Actor) ([]store.Domain, []store.DomainSkip, error) {
+	added, skipped, err := s.store.AddDomains(values)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(added) > 0 {
+		domains := make([]string, len(added))
+		for i, domain := range added {
+			domains[i] = domain.Domain
+		}
+		if err := s.LogAudit(ctx, "BATCH_ADD_DOMAINS", nil, map[string]any{
+			"domains": domains, "skipped": len(skipped),
+		}, actor); err != nil {
+			return nil, nil, err
+		}
+	}
+	return added, skipped, nil
+}
+
+func (s *Service) DeleteDomains(ctx context.Context, values []string, actor Actor) ([]string, []store.DomainSkip, error) {
+	deleted, failed, err := s.store.DeleteDomains(values)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(deleted) > 0 {
+		if err := s.LogAudit(ctx, "BATCH_DELETE_DOMAINS", nil, map[string]any{
+			"domains": deleted, "failed": len(failed),
+		}, actor); err != nil {
+			return nil, nil, err
+		}
+	}
+	return deleted, failed, nil
+}

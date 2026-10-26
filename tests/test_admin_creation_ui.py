@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 import textwrap
@@ -36,12 +37,12 @@ class AdminCreationUiTest(unittest.TestCase):
         self.assertIn('id="domains-view"', html)
         self.assertIn("viewName === 'domains'", script)
 
-        # 列表具备加载、空与错误三种状态。
+        # 列表具备加载、空与错误三种状态，复选列加入后跨五列。
         self.assertIn('id="domains-list"', html)
         self.assertIn('loading-row', html)
         for state in ('loading-row', 'empty-row', 'error-row'):
             with self.subTest(state=state):
-                self.assertRegex(script, rf"colspan=\"4\" class=\"{state}")
+                self.assertRegex(script, rf"colspan=\"5\" class=\"{state}")
         self.assertIn('暂无域名', script)
 
         # 启停开关、删除确认与行内错误兜底沿用页面既有模式。
@@ -51,16 +52,101 @@ class AdminCreationUiTest(unittest.TestCase):
         self.assertIn("title: '删除域名'", script)
         self.assertIn('.domain-switch.is-on .domain-switch-track', css)
 
+    def test_domain_batch_add_form_contract(self):
+        html = read('src/frontend/templates/admin_mailbox.html')
+        script = read('src/frontend/static/scripts/admin_mailbox.js')
+
+        # 新增标记一律不带内联事件或行内样式，兼容严格 CSP。
+        section = html[html.index('<div class="domains-content">'):html.index('id="settings-view"')]
+        self.assertIsNone(re.search(r'\son[a-z]+\s*=', section))
+        self.assertNotIn('style=', section)
+
+        # 文本域接受换行、逗号、空格或分号分隔的多个域名。
+        self.assertRegex(html, r'<textarea id="domain-add-input"[^>]*rows="3"')
+        self.assertIn('每行一个，也支持逗号、空格或分号分隔', html)
+        self.assertIn('parseDomainEntries(raw)', script)
+        self.assertIn(r"/[\s,;，；]+/u", script)
+        self.assertIn(r".replace(/\.$/, '')", script)
+
+        # 实时计数、空态禁用提交、超过 200 内联提示并锁定提交。
+        self.assertIn('id="domain-add-count" aria-live="polite">将添加 0 个域名<', html)
+        self.assertIn('将添加 ${count} 个域名', script)
+        self.assertIn('id="domain-add-limit" role="alert" hidden>', html)
+        self.assertIn('单次最多添加 200 个域名', html + script)
+        self.assertIn('id="domain-add-submit" disabled>', html)
+        self.assertIn('submitButton.disabled = count === 0 || count > 200', script)
+
+        # 一律提交批量接口，服务端逐项校验为准；忙碌态沿用共享 helper。
+        self.assertIn("this.domainRequest('/api/admin/domains/batch-add'", script)
+        self.assertIn('body: JSON.stringify({ domains })', script)
+        self.assertIn("MaildropUI.setBusy(submitButton, true, '添加中...')", script)
+
+        # 持久结果面板：role=status 通报，列出每个跳过域名及原因并转义。
+        self.assertIn(
+            '<div class="domain-result" id="domains-result" role="status"'
+            ' aria-live="polite" hidden></div>',
+            html,
+        )
+        self.assertIn("renderDomainResult({ type: 'add'", script)
+        self.assertIn('已添加 ${added.length} 个域名', script)
+        self.assertIn('跳过 ${skipped.length} 个：', script)
+        self.assertIn('escapeHtml(item.reason)', script)
+        self.assertIn('aria-label="关闭结果提示"', script)
+
+        # 只有实际添加成功的域名从文本域移除，被跳过的留给管理员修正；
+        # 国际化域名先转成与服务端一致的 Punycode 再比较。
+        self.assertIn("input.value = domains.filter(domain => !addedSet.has(toAsciiDomain(domain))).join('\\n')", script)
+        self.assertIn("return new URL(`http://${domain}`).hostname;", script)
+
+    def test_domain_batch_delete_contract(self):
+        html = read('src/frontend/templates/admin_mailbox.html')
+        script = read('src/frontend/static/scripts/admin_mailbox.js')
+        css = read('src/frontend/static/styles/admin_mailbox.css')
+
+        # 复选列：行内复选框带读屏名称，表头全选支持半选态。
+        self.assertIn('id="domains-select-all"', html)
+        self.assertIn('aria-label="选择全部域名"', html)
+        self.assertIn('aria-label="选择域名 ${escapeHtml(item.domain)}"', script)
+        self.assertIn('selectAll.indeterminate = count > 0 && count < rowCount', script)
+        self.assertIn('class="table-select"><input type="checkbox" id="domains-select-all"', html)
+
+        # 选中计数与危险按钮；N=0 时禁用，文案嵌真实数量。
+        self.assertIn('id="domains-selected-summary"', html)
+        self.assertIn('已选择 ${count} 个域名', script)
+        self.assertIn('删除所选（<span id="domains-batch-delete-count">0</span>）', html)
+        self.assertIn('deleteButton.disabled = count === 0', script)
+        self.assertIn('.domains-batch-bar', css)
+
+        # 确认弹窗沿用页面模式：计数、至多 10 个域名与「等 N 个」折叠。
+        self.assertIn("title: '批量删除域名'", script)
+        self.assertIn('selected.slice(0, 10)', script)
+        self.assertIn('等 ${selected.length} 个', script)
+        self.assertIn('请先选择要删除的域名', script)
+
+        # 提交批量删除接口；成功后刷新域名缓存并裁剪勾选集。
+        self.assertIn("this.domainRequest('/api/admin/domains/batch-delete'", script)
+        self.assertIn('body: JSON.stringify({ domains: selected })', script)
+        self.assertIn("renderDomainResult({ type: 'delete'", script)
+        self.assertIn('已删除 ${deleted.length} 个域名', script)
+        self.assertIn('失败 ${failed.length} 个：', script)
+        self.assertIn("deleted.forEach(domain => this.selectedDomains.delete(String(domain)))", script)
+        self.assertIn('this.selectedDomains].filter(domain => existing.has(domain))', script)
+
+        # 409 等整体失败原样展示服务端文案，列表保持不变（仅成功路径刷新）。
+        self.assertIn("renderDomainResult({ type: 'error', message: error.message || '批量删除域名失败' })", script)
+        self.assertIn("console.error('批量删除域名失败:', error)", script)
+
     def test_domain_settings_use_the_admin_domains_api_contract(self):
         script = read('src/frontend/static/scripts/admin_mailbox.js')
 
-        # 增删改查到 /api/admin/domains，路径参数统一 URL 编码。
+        # 增删改查到 /api/admin/domains，路径参数统一 URL 编码；添加一律走批量接口。
         self.assertIn('async domainRequest(', script)
         self.assertIn("this.domainRequest('/api/admin/domains'", script)
+        self.assertIn("this.domainRequest('/api/admin/domains/batch-add'", script)
+        self.assertIn("this.domainRequest('/api/admin/domains/batch-delete'", script)
         self.assertEqual(script.count('/api/admin/domains/${encodeURIComponent(domain)}'), 2)
         self.assertIn("method: 'PUT'", script)
         self.assertIn("method: 'DELETE'", script)
-        self.assertIn('isValidDomainName(domain)', script)
 
         # 域名变更后必须刷新邮箱创建表单的域名缓存。
         self.assertIn('async refreshDomainData()', script)
