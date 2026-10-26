@@ -191,6 +191,32 @@ curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
 | `PUT` | `/api/admin/sub-admins/<sub_admin_id>` | 更新子管理员 |
 | `DELETE` | `/api/admin/sub-admins/<sub_admin_id>` | 删除子管理员 |
 
+### 域名设置
+
+收信域名保存在数据库中，由管理后台「域名设置」维护，修改后立即生效。`.env` 的 `DOMAINS`
+只在域名表为空（首次启动）时导入。`/api/get_random_address`、`/api/get_domain` 与注册接口
+都只使用已启用的域名；没有任何启用域名时返回 `503`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/domains` | 查询全部域名 |
+| `POST` | `/api/admin/domains` | 添加域名，请求体 `{"domain": "example.com"}`，成功返回 `201` |
+| `PUT` | `/api/admin/domains/<domain>` | 启用或禁用，请求体 `{"enabled": true}` |
+| `DELETE` | `/api/admin/domains/<domain>` | 删除域名 |
+
+域名对象格式：`{"domain": "example.com", "enabled": true, "created_at": 1800000000, "updated_at": 1800000000}`。
+域名会先规范化：去掉首尾空白，转成小写，去掉末尾的点，国际化域名转为 Punycode。
+
+| 状态码 | `error` | 场景 |
+| --- | --- | --- |
+| `400` | `域名格式不正确` | 域名缺失或格式非法 |
+| `400` | `enabled必须是布尔值` | `PUT` 的 `enabled` 缺失或不是布尔值 |
+| `404` | `域名不存在` | 路径中的域名不存在 |
+| `409` | `域名已存在` | 重复添加 |
+| `409` | `至少需要保留一个启用的域名` | 删除或禁用最后一个启用的域名 |
+
+子管理员注册只能使用自己授权的域名，其中在「域名设置」里被禁用的域名会被排除；不在域名表中的授权域名仍可使用。
+
 ## 已移除或不兼容
 
 - 旧测试发信 API 已删除，服务不提供写信、回复、转发或测试发信能力；

@@ -6,6 +6,7 @@
 Maildrop is a self hostable and easy to use disposable email service that allows you to receive emails on a random email address on your domain.
 
 **Now with V2 Features:**
+*   **Single Go Binary:** Web UI, REST API and SMTP server in one self-contained executable.
 *   **Database Storage:** Robust SQLite support for better performance and data integrity.
 *   **Credential Access:** Mailbox key exchange followed by Bearer-token API access, with a separate admin password.
 *   **Enhanced API:** Comprehensive RESTful API V2 for integration and management.
@@ -32,7 +33,7 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 - [x] **Clean UI**
 - [x] **Easy setup**
 - [x] **RESTful API V2**
-- [x] **Admin Panel** for managing mailboxes and system settings
+- [x] **Admin Panel** for managing mailboxes, domains and system settings (admin login also available from the homepage)
 - [x] **Configurable Retention** (from minutes to permanent)
 
 ### Planned Features
@@ -43,10 +44,12 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 
 ## Running the application
 
+Maildrop is a single Go binary that runs the web UI/API, the SMTP server and the cleanup job.
+The frontend is embedded into the binary, and data is stored in SQLite (`data/mailbox.db`).
+
 ### Prerequisites
 
-- Python 3
-- pip
+- Go 1.26+ (only needed to build from source)
 
 ### Installation and running
 
@@ -57,33 +60,40 @@ Maildrop is a self hostable and easy to use disposable email service that allows
     cd mail
     ```
 
-2.  **Create a venv and activate it**
+2.  **Configure**
 
     ```bash
-    python -m venv venv
-    source venv/bin/activate
+    cp .env.example .env
+    # edit .env: set DOMAINS and a strong PASSWORD
     ```
 
-3.  **Install the requirements**
+3.  **Build and run**
 
     ```bash
-    pip install -r requirements.txt
+    go build -o maildrop ./cmd/maildrop
+    sudo ./maildrop
     ```
 
-4.  **Run the application**
+**Binding the SMTP port 25 requires root (or `CAP_NET_BIND_SERVICE`).**
 
-    ```bash
-    sudo python app.py
-    ```
+### Managing domains
 
-**The application must be run as root for the SMTP server to work**
+`DOMAINS` in `.env` only seeds the domain list on the very first start.
+After that, add, enable, disable or remove receiving domains in the admin panel (`/admin` → 域名设置);
+changes take effect immediately without a restart.
+
+### Upgrading from the Python version
+
+Stop the old service, back up `data/mailbox.db`, then start the Go binary with the same `.env` and `data/` directory.
+The database schema is migrated automatically on first start. JSON storage (`USE_DATABASE=false`) is no longer supported,
+and `FLASK_SECRET_KEY` is no longer used.
 
 ### Connecting to your domain
 
 1. Ensure port 25 is open as this is the port the email server uses. Some ISPs block this so you may need to use a tunnel or host maildrop in the cloud.
 2. Edit your domains dns settings and create an `A` record pointing to your public IP.
 3. Edit your domains dns settings and create an `MX` record pointing to the domain you made your `A` record on.
-4. Edit `.env` and change the domain to your domain.
+4. Set `DOMAINS` in `.env` before the first start, or add the domain later in the admin panel (域名设置).
 
 ### Running with docker
 
@@ -109,9 +119,10 @@ services:
     ports:
       - "5000:5000"
       - "25:25"
+    volumes:
+      - ./data:/app/data
     environment:
-      - DOMAIN=yourdomain.com
-      - USE_DATABASE=true
+      - DOMAINS=yourdomain.com
       - PASSWORD=replace-with-a-strong-admin-password
 ```
 and then start it: `sudo docker compose up -d`
