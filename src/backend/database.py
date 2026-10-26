@@ -249,6 +249,7 @@ class DatabaseManager:
             # 创建索引
             conn.execute('CREATE INDEX IF NOT EXISTS idx_mailboxes_address ON mailboxes (address)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_mailboxes_expires ON mailboxes (expires_at)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_mailboxes_access_token ON mailboxes (access_token)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_emails_mailbox ON emails (mailbox_id)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_emails_timestamp ON emails (timestamp)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes (code)')
@@ -324,7 +325,7 @@ class DatabaseManager:
                       created_source: str = "unknown") -> Dict:
         """创建新邮箱"""
         mailbox_id = str(uuid.uuid4())
-        access_token = str(uuid.uuid4())
+        access_token = secrets.token_urlsafe(32)
         mailbox_key = _generate_mailbox_key()
         current_time = int(time.time())
         expires_at = current_time + (retention_days * 24 * 60 * 60)
