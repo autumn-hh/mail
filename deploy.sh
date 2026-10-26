@@ -24,14 +24,21 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 检查Docker是否安装
+# compose 命令在 check_docker 中探测一次，后续统一通过这个数组调用。
+COMPOSE=()
+
+# 检查Docker是否安装，并探测 Compose v2 插件或旧版 docker-compose。
 check_docker() {
     if ! command -v docker &> /dev/null; then
         log_error "Docker未安装，请先安装Docker"
         exit 1
     fi
-    
-    if ! command -v docker-compose &> /dev/null; then
+
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE=(docker compose)
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE=(docker-compose)
+    else
         log_error "Docker Compose未安装，请先安装Docker Compose"
         exit 1
     fi
@@ -45,18 +52,18 @@ check_config() {
         log_warn "请编辑 .env 文件配置你的域名和密码！"
         return 1
     fi
-    
+
     # 检查关键配置
     if grep -q "yourdomain.com" .env; then
         log_warn "请在 .env 文件中设置你的域名！"
         return 1
     fi
-    
+
     if grep -q "your_secure_password_here" .env; then
         log_warn "请在 .env 文件中设置安全的管理员密码！"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -70,52 +77,54 @@ create_dirs() {
 # 启动服务
 start_service() {
     log_info "启动TempMail服务..."
-    docker-compose up -d
-    
+    "${COMPOSE[@]}" up -d
+
     log_info "等待服务启动..."
     sleep 10
-    
+
     # 检查服务状态
-    if docker-compose ps | grep -q "Up"; then
+    if "${COMPOSE[@]}" ps | grep -q "Up"; then
         log_info "服务启动成功！"
-        log_info "Web界面: http://localhost:80"
-        log_info "API测试: http://localhost:80/api-test"
-        log_info "管理面板: http://localhost:80/admin"
+        log_info "Web界面: http://localhost:8081"
+        log_info "API测试: http://localhost:8081/api-test"
+        log_info "管理面板: http://localhost:8081/admin"
+        log_info "Compose 将容器 5000 映射到宿主机 8081，绑定地址由 WEB_BIND_HOST 决定"
     else
         log_error "服务启动失败，请查看日志"
-        docker-compose logs
+        "${COMPOSE[@]}" logs
     fi
 }
 
 # 停止服务
 stop_service() {
     log_info "停止TempMail服务..."
-    docker-compose down
+    "${COMPOSE[@]}" down
 }
 
 # 重启服务
 restart_service() {
     log_info "重启TempMail服务..."
-    docker-compose restart
+    "${COMPOSE[@]}" restart
 }
 
 # 查看日志
 show_logs() {
-    docker-compose logs -f
+    "${COMPOSE[@]}" logs -f
 }
 
 # 更新服务
 update_service() {
     log_info "更新Maildrop服务..."
-    docker-compose down
-    docker-compose build --no-cache
-    docker-compose up -d
+    "${COMPOSE[@]}" down
+    log_info "拉取基础镜像并重新构建..."
+    "${COMPOSE[@]}" build --pull
+    "${COMPOSE[@]}" up -d
 }
 
 # 主函数
 main() {
     check_docker
-    
+
     case "${1:-start}" in
         start)
             create_dirs

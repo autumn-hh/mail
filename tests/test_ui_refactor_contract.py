@@ -339,11 +339,12 @@ class UiRefactorContractTest(unittest.TestCase):
         )
 
     def test_only_strict_credential_route_is_generated(self):
-        pages = read('src/backend/routes/pages.py')
-        routes = re.findall(r'@bp\.route\(["\']([^"\']+)["\']', pages)
-        self.assertEqual(routes.count('/web/<path:credential>'), 1)
-        self.assertNotIn('/mailbox', routes)
-        self.assertIn("credential.rsplit('----', 1)", pages)
+        # 页面路由由 Go 服务注册；凭据从最后一个分隔符拆分，避免邮箱 local-part 中的连字符干扰。
+        pages = read('internal/web/pages.go')
+        routes = re.findall(r'"(?:GET|HEAD) (/[^"]*)"', pages)
+        self.assertEqual(routes.count('/web/{credential...}'), 1)
+        self.assertFalse([route for route in routes if route.startswith('/mailbox')])
+        self.assertIn('strings.LastIndex(credential, "----")', pages)
 
         expected_builders = {
             'src/frontend/static/scripts/mailbox_login.js':

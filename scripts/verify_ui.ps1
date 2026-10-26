@@ -37,8 +37,11 @@ try {
     # 将编译缓存放入系统临时目录，避免验证过程污染工作区。
     New-Item -ItemType Directory -Path $compileCache -Force | Out-Null
     $env:PYTHONPYCACHEPREFIX = $compileCache
-    Invoke-CheckedStep '检查 Python 语法' {
-        python -m compileall -q app.py config.py src tests
+    Invoke-CheckedStep '编译 Go 后端' {
+        go build ./...
+    }
+    Invoke-CheckedStep '检查 Python 脚本语法' {
+        python -m compileall -q scripts tests
     }
 
     Write-Host "`n==> 检查全部前端 JavaScript 语法" -ForegroundColor Cyan

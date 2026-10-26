@@ -1,27 +1,31 @@
-"""在隔离数据上验证实际页面；绝不启动 app.py、SMTP 或清理任务。"""
+"""在隔离数据上验证实际页面：构建 Go 二进制并以子进程运行（内置 Web、SMTP 与定时清理），数据目录为全新临时目录，退出时终止子进程并清理。"""
 
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+from email.message import EmailMessage
 import json
-import gc
 import hashlib
 from importlib.metadata import version
 import platform
+import secrets
+import smtplib
+import socket
+import sqlite3
 import subprocess
-import logging
 import os
 from pathlib import Path
 import shutil
 import statistics
-import sys
 import tempfile
 import threading
 import traceback
 import time
 from urllib.parse import quote, urlparse
+import urllib.error
+import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,141 +44,328 @@ ADMIN_VIEWS = (
     "security",
     "register",
     "sub-admins",
+    "domains",
     "settings",
 )
 ADMIN_PASSWORD = "ui-fixture-admin-only"
 
 
+def free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def server_log_tail(temp_root):
+    try:
+        return (temp_root / "server.log").read_text(
+            encoding="utf-8", errors="replace"
+        )[-2000:]
+    except OSError:
+        return "<无服务器日志>"
+
+
+def wait_ready(proc, base, temp_root, timeout=60):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"隔离服务器提前退出（退出码 {proc.returncode}）：\n"
+                + server_log_tail(temp_root)
+            )
+        try:
+            with urllib.request.urlopen(base + "/", timeout=2) as response:
+                if response.status == 200:
+                    return
+        except (OSError, urllib.error.URLError):
+            time.sleep(0.25)
+    raise RuntimeError("隔离服务器启动超时：\n" + server_log_tail(temp_root))
+
+
+def stop_server(proc):
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        # Windows 上 terminate 即 TerminateProcess；其他平台先 SIGTERM 再强制。
+        proc.kill()
+        proc.wait(timeout=15)
+
+
+def fixture_mailbox_key():
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return "".join(secrets.choice(alphabet) for _ in range(10))
+
+
 @contextmanager
 def isolated_site(port=0):
-    # 先确定临时目录边界，再导入应用；dotenv 不得覆盖隔离数据库路径。
+    # 先确定临时目录边界，再构建并启动 Go 服务；服务配置只指向该临时目录。
     temp_root = Path(tempfile.mkdtemp(prefix="maildrop-ui-")).resolve()
     assert temp_root.parent == Path(tempfile.gettempdir()).resolve()
     assert (
         temp_root.name.startswith("maildrop-ui-")
         and not temp_root.is_symlink()
     )
-    os.environ.update(
-        {
-            "DATABASE_PATH": str(temp_root / "mailbox.db"),
-            "USE_DATABASE": "true",
-            "INBOX_FILE_NAME": str(temp_root / "inbox.json"),
-            "PASSWORD": ADMIN_PASSWORD,
-            "ENABLE_IP_WHITELIST": "false",
-            "TRUST_PROXY_HOPS": "0",
-            "DOMAINS": "example.test,studio.test",
-            "IP_MAX_FAILED_ATTEMPTS": "1000",
-        }
-    )
-    sys.path[:0] = [str(ROOT), str(ROOT / "src" / "backend")]
-    from database import db_manager
-    from src.backend.flask_app import app
-    from werkzeug.serving import make_server
-
-    assert Path(db_manager.db_path).resolve().parent == temp_root
-    boxes = {}
-    for name in ("studio", "empty", "expired", "disabled"):
-        boxes[name] = db_manager.create_mailbox(
-            f"{name}@example.test",
-            created_source="admin",
-            # 覆盖白名单图标状态，不把测试修改扩散到任何真实邮箱。
-            sender_whitelist=(
-                ["allowed@studio.test"] if name == "empty" else None
-            ),
+    proc = None
+    server_log = None
+    stop_guard = threading.Event()
+    db_path = temp_root / "data" / "mailbox.db"
+    try:
+        binary = temp_root / ("maildrop.exe" if os.name == "nt" else "maildrop")
+        build = subprocess.run(
+            ["go", "build", "-o", str(binary), "./cmd/maildrop"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
-    with db_manager.get_connection() as conn:
-        conn.execute(
+        if build.returncode:
+            tail = (build.stderr or build.stdout or "").strip()[-2000:]
+            raise RuntimeError("Go 构建失败：\n" + tail)
+        go_version = subprocess.check_output(
+            ["go", "version"], text=True
+        ).removeprefix("go version ").strip()
+        web_port = port or free_port()
+        smtp_port = free_port()
+        while smtp_port == web_port:
+            smtp_port = free_port()
+        env = dict(os.environ)
+        env.update(
+            {
+                # Go 进程内嵌 Web、SMTP 与定时清理；均绑定 loopback 与临时目录。
+                "FLASK_HOST": "127.0.0.1",
+                "FLASK_PORT": str(web_port),
+                "SMTP_HOST": "127.0.0.1",
+                "SMTP_PORT": str(smtp_port),
+                "DATABASE_PATH": str(db_path),
+                "USE_DATABASE": "true",
+                "INBOX_FILE_NAME": str(temp_root / "inbox.json"),
+                "PASSWORD": ADMIN_PASSWORD,
+                "ENABLE_IP_WHITELIST": "false",
+                "TRUST_PROXY_HOPS": "0",
+                "DOMAINS": "example.test,studio.test",
+                "IP_MAX_FAILED_ATTEMPTS": "1000",
+            }
+        )
+        server_log = open(
+            temp_root / "server.log", "w", encoding="utf-8", errors="replace"
+        )
+        proc = subprocess.Popen(
+            [str(binary)],
+            cwd=temp_root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=server_log,
+            stderr=subprocess.STDOUT,
+        )
+        base = f"http://127.0.0.1:{web_port}"
+        wait_ready(proc, base, temp_root)
+
+        def admin_api(method, path, body=None):
+            request = urllib.request.Request(
+                base + path,
+                method=method,
+                headers={
+                    "Authorization": "Bearer " + ADMIN_PASSWORD,
+                    "Content-Type": "application/json",
+                },
+                data=None if body is None else json.dumps(body).encode("utf-8"),
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return json.loads(response.read())
+
+        def fixture_sql(statement, params=()):
+            # Go 存储以 WAL 与 busy_timeout 打开数据库，外部短事务直写安全。
+            with closing(sqlite3.connect(str(db_path), timeout=10)) as conn:
+                conn.execute(statement, params)
+                conn.commit()
+
+        def fixture_query(statement, params=()):
+            with closing(sqlite3.connect(str(db_path), timeout=10)) as conn:
+                return conn.execute(statement, params).fetchone()
+
+        boxes = {}
+        for name in ("studio", "empty", "expired", "disabled"):
+            payload = {"address": f"{name}@example.test"}
+            if name == "empty":
+                # 覆盖白名单图标状态，不把测试修改扩散到任何真实邮箱。
+                payload["sender_whitelist"] = ["allowed@studio.test"]
+            boxes[name] = admin_api(
+                "POST", "/api/admin/mailboxes", payload
+            )["data"]
+        # 无任何公开 API 能把过期时间设为过去（retention_days 下限 1 天且
+        # 从现在顺延）；schema 与 Python 版一致，保持旧夹具语义直接改写。
+        fixture_sql(
             "UPDATE mailboxes SET expires_at = ? WHERE id = ?",
             (int(time.time()) - 10, boxes["expired"]["id"]),
         )
-        conn.execute(
-            "UPDATE mailboxes SET is_active = 0 WHERE id = ?",
-            (boxes["disabled"]["id"],),
+        admin_api(
+            "PUT",
+            f"/api/admin/mailboxes/{boxes['disabled']['id']}",
+            {"is_active": False},
         )
-    conn.close()
-    db_manager.create_sub_admin(
-        "fixture-studio-team",
-        ["example.test"],
-        notes="隔离测试账号，不可用于生产",
-    )
-
-    def add_message(
-        subject, body="这是一封用于界面验证的测试邮件。", html=False
-    ):
-        return db_manager.add_email(
-            boxes["studio"]["id"],
+        admin_api(
+            "POST",
+            "/api/admin/sub-admins",
             {
-                "id": str(uuid.uuid4()),
-                "From": "Maildrop Studio <hello@studio.test>",
-                "To": boxes["studio"]["address"],
-                "Subject": subject,
-                "Body": body,
-                "ContentType": "text/html" if html else "text/plain",
-                "Timestamp": int(time.time()),
-                "Sent": "刚刚",
+                "token": "fixture-studio-team",
+                "domains": ["example.test"],
+                "notes": "隔离测试账号，不可用于生产",
             },
         )
 
-    boxes["long"] = db_manager.create_mailbox(
-        "research-notes-" + "a" * 42 + "@" + "studio-" * 8 + "example.test",
-        created_source="admin",
-    )
-    ids = []
-    for number in range(24):
+        def load_inbox(box):
+            request = urllib.request.Request(
+                base + "/api/get_inbox?address=" + quote(box["address"], safe=""),
+                headers={"Authorization": "Bearer " + box["access_token"]},
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return json.loads(response.read())
+
+        def add_message(
+            subject, body="这是一封用于界面验证的测试邮件。", html=False
+        ):
+            # 通过 Go 自带 SMTP 真实投递；DATA 应答前服务端已完成入库。
+            box = boxes["studio"]
+            before = {email["id"] for email in load_inbox(box)}
+            message = EmailMessage()
+            message["From"] = "Maildrop Studio <hello@studio.test>"
+            message["To"] = box["address"]
+            message["Subject"] = subject
+            message.set_content(body, subtype="html" if html else "plain")
+            with smtplib.SMTP("127.0.0.1", smtp_port, timeout=15) as client:
+                client.send_message(
+                    message,
+                    from_addr="hello@studio.test",
+                    to_addrs=[box["address"]],
+                )
+            deadline = time.monotonic() + 10
+            while True:
+                for email in load_inbox(box):
+                    if email["id"] not in before:
+                        return str(email["id"])
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        "SMTP 投递后未在收件箱找到新邮件：" + subject
+                    )
+                time.sleep(0.1)
+
+        # 公开注册与管理接口都把地址本地部分收紧为字母数字 3–20 位，
+        # 超长地址没有可达 API；schema 与 Python 版一致，按原列结构直接写入。
+        long_address = (
+            "research-notes-" + "a" * 42 + "@" + "studio-" * 8 + "example.test"
+        )
+        now = int(time.time())
+        boxes["long"] = {
+            "id": str(uuid.uuid4()),
+            "address": long_address,
+            "access_token": secrets.token_urlsafe(32),
+            "mailbox_key": fixture_mailbox_key(),
+        }
+        fixture_sql(
+            "INSERT INTO mailboxes (id, address, created_at, expires_at,"
+            " retention_days, is_active, sender_whitelist, whitelist_enabled,"
+            " created_by_ip, access_token, mailbox_key, last_accessed,"
+            " created_source, allowed_domains, storage_used, storage_limit)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                boxes["long"]["id"], long_address, now, now + 30 * 86400, 30,
+                1, "[]", 0, "127.0.0.1", boxes["long"]["access_token"],
+                boxes["long"]["mailbox_key"], now, "admin", "[]", 0, 3145728,
+            ),
+        )
+        ids = []
+        for number in range(24):
+            ids.append(
+                add_message(
+                    f"{number + 1:02d} · 关于周末的计划与一封简短来信",
+                    "把重要的消息留在眼前。\n邮件正文与地址均为隔离测试数据。",
+                )
+            )
         ids.append(
             add_message(
-                f"{number + 1:02d} · 关于周末的计划与一封简短来信",
-                "把重要的消息留在眼前。\n邮件正文与地址均为隔离测试数据。",
+                "很长的邮件主题用于检查不同屏幕的中文换行、视觉层级和可读性。" * 3,
+                "a" * 160,
             )
         )
-    ids.append(
-        add_message(
-            "很长的邮件主题用于检查不同屏幕的中文换行、视觉层级和可读性。" * 3,
-            "a" * 160,
+        html_id = add_message(
+            "HTML · 安静的阅读空间",
+            "<h1>你好，Maildrop。</h1><p>这是一封安全 HTML 测试"
+            "邮件。</p><p>愿每一封重要的信，都有一个安静的位置。</p>",
+            True,
         )
-    )
-    html_id = add_message(
-        "HTML · 安静的阅读空间",
-        "<h1>你好，Maildrop。</h1><p>这是一封安全 HTML 测试"
-        "邮件。</p><p>愿每一封重要的信，都有一个安静的位置。</p>",
-        True,
-    )
-    unsafe_id = add_message(
-        "隔离测试 · 不可信 HTML",
-        "<script>parent.__mailAttack=true</scri"
-        'pt><img src="https://maildrop-qa.inval'
-        'id/pixel"><iframe src="https://maildro'
-        'p-qa.invalid/frame"></iframe><form act'
-        'ion="https://maildrop-qa.invalid/post"'
-        "><input></form><p>只有安全文本应该显示。</p>",
-        True,
-    )
-    fixtures = {
-        "boxes": boxes,
-        "html_id": html_id,
-        "unsafe_id": unsafe_id,
-        "ids": ids,
-    }
-    logging.getLogger("werkzeug").setLevel(logging.ERROR)
-    app.config.update(TESTING=True)
-    server = make_server("127.0.0.1", port, app, threaded=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}", fixtures, add_message
+        unsafe_id = add_message(
+            "隔离测试 · 不可信 HTML",
+            "<script>parent.__mailAttack=true</scri"
+            'pt><img src="https://maildrop-qa.inval'
+            'id/pixel"><iframe src="https://maildro'
+            'p-qa.invalid/frame"></iframe><form act'
+            'ion="https://maildrop-qa.invalid/post"'
+            "><input></form><p>只有安全文本应该显示。</p>",
+            True,
+        )
+        fixtures = {
+            "boxes": boxes,
+            "html_id": html_id,
+            "unsafe_id": unsafe_id,
+            "ids": ids,
+            "server": {"go": go_version},
+        }
+
+        def expired_guard():
+            # Go 内置清理每小时物理删除过期邮箱；看门线程在夹具被删后按
+            # 原地址重建并刷新 fixtures，长轮验证不受清理周期影响。
+            while not stop_guard.wait(15):
+                try:
+                    exists = fixture_query(
+                        "SELECT id FROM mailboxes WHERE id = ?",
+                        (boxes["expired"]["id"],),
+                    )
+                    if exists:
+                        continue
+                    boxes["expired"] = admin_api(
+                        "POST",
+                        "/api/admin/mailboxes",
+                        {"address": "expired@example.test"},
+                    )["data"]
+                    fixture_sql(
+                        "UPDATE mailboxes SET expires_at = ? WHERE id = ?",
+                        (int(time.time()) - 10, boxes["expired"]["id"]),
+                    )
+                except Exception:
+                    continue
+
+        guard = threading.Thread(
+            target=expired_guard, name="ui-qa-expired-guard", daemon=True
+        )
+        guard.start()
+        try:
+            yield base, fixtures, add_message
+        finally:
+            stop_guard.set()
+            guard.join(timeout=10)
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
-        # SQLite 上下文提交事务但不一定关闭连接；回收已结束请求的连接后再清理。
-        gc.collect()
+        if proc is not None:
+            stop_server(proc)
+        if server_log is not None:
+            server_log.close()
         # 递归清理只允许此次已经检查的临时根目录，不接受调用方传入路径。
         assert temp_root.parent == Path(tempfile.gettempdir()).resolve()
         assert (
             temp_root.name.startswith("maildrop-ui-")
             and not temp_root.is_symlink()
         )
-        shutil.rmtree(temp_root)
+        # Windows 上进程结束后文件句柄释放可能稍有延迟。
+        for attempt in range(25):
+            try:
+                shutil.rmtree(temp_root)
+                break
+            except PermissionError:
+                if attempt == 24:
+                    raise
+                time.sleep(0.2)
 
 
 def mailbox_path(box, key=None):
@@ -968,8 +1159,8 @@ def run(args, base, fixtures, add_message):
     )
     report = {
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "isolation": "loopback / temporary database / Web on"
-        "ly / synthetic accounts",
+        "isolation": "loopback / temporary database / isolated Go server "
+        "(web + smtp + cleanup) / synthetic accounts",
         "cases": [],
         "states": [],
         "core": {},
@@ -981,7 +1172,7 @@ def run(args, base, fixtures, add_message):
             "python": platform.python_version(),
             "os": platform.platform(),
             "playwright": version("playwright"),
-            "flask": version("flask"),
+            "go": fixtures["server"]["go"],
             "axe_core": "4.11.0",
         },
         "commit": subprocess.check_output(
@@ -1320,9 +1511,12 @@ def main():
     report = json.loads(report_path.read_text(encoding="utf-8"))
     report["cleanup"] = {
         "web_server_stopped": True,
+        "server_process_terminated": True,
         "temporary_data_removed": True,
-        "smtp_started": False,
-        "cleanup_task_started": False,
+        # Go 二进制单进程内嵌 SMTP 与定时清理（绑定 loopback 与临时库），
+        # 随隔离子进程一并终止。
+        "smtp_started": True,
+        "cleanup_task_started": True,
     }
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
