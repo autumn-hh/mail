@@ -1,5 +1,7 @@
 # Maildrop 邮局服务：核心架构与实现机制全解析
 
+> 本文描述旧 Python 实现。当前 Go 入口为 `cmd/maildrop/main.go`，后端位于 `internal/maildrop/`，页面资源通过 `src/frontend/assets.go` 嵌入。运行和兼容策略见 [Go 迁移说明](docs/go-migration.md)。
+
 ## 0. 为什么你需要 Maildrop？（引流与应用场景）
 
 在数字隐私日益受到威胁的今天，你是否遇到过以下场景？

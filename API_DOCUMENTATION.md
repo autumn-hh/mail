@@ -1,5 +1,14 @@
 # Maildrop 页面与 API 文档
 
+当前后端使用 Go，保留以下页面与接口路径。首页包含“管理员登录”入口。新增管理员域名设置接口：
+
+| 方法 | 路径 | 请求 / 响应 |
+| --- | --- | --- |
+| GET | `/api/admin/domains` | `{"success":true,"data":{"domains":["example.com"]}}` |
+| PUT | `/api/admin/domains` | 请求 `{"domains":["example.com"]}`；成功响应同 GET |
+
+两者要求 `Authorization: Bearer <PASSWORD>`。保存后持久化、立即影响新建邮箱和 SMTP 收信；移除域名保留已有邮件及凭据。更多说明见 [Go 迁移文档](docs/go-migration.md)。
+
 本文档描述当前公开页面、邮箱凭据流和主要 API。所有示例默认服务地址为
 `http://127.0.0.1:5000`。
 

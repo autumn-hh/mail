@@ -111,6 +111,11 @@ class AdminMailboxManager {
     }
     
     init() {
+        document.getElementById('domain-settings-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            this.saveDomainSettings();
+        });
+        document.getElementById('domain-settings-reload').addEventListener('click', () => this.loadDomainSettings());
         // 检查是否已登录
         if (this.authToken) {
             this.showMainContent();
@@ -414,6 +419,60 @@ class AdminMailboxManager {
             loadSubAdmins();
         } else if (viewName === 'register') {
             this.resetRegisterView();
+        } else if (viewName === 'settings') {
+            this.loadDomainSettings();
+        }
+    }
+
+    async loadDomainSettings() {
+        const input = document.getElementById('domain-settings-input');
+        const save = document.getElementById('domain-settings-save');
+        const status = document.getElementById('domain-settings-status');
+        input.disabled = true;
+        save.disabled = true;
+        status.textContent = '正在加载域名…';
+        try {
+            const response = await this.apiRequest('/api/admin/domains');
+            input.value = response.data.domains.join('\n');
+            input.disabled = false;
+            save.disabled = false;
+            status.textContent = '域名配置已加载。';
+        } catch (error) {
+            status.textContent = '加载失败：' + error.message;
+        }
+    }
+
+    async saveDomainSettings() {
+        const input = document.getElementById('domain-settings-input');
+        const save = document.getElementById('domain-settings-save');
+        const reload = document.getElementById('domain-settings-reload');
+        const status = document.getElementById('domain-settings-status');
+        const domains = input.value.split(/[\r\n,]+/).map(value => value.trim()).filter(Boolean);
+        if (!domains.length || domains.length > 100) {
+            status.textContent = '请填写 1–100 个域名。';
+            input.focus();
+            return;
+        }
+        save.disabled = true;
+        reload.disabled = true;
+        input.disabled = true;
+        status.textContent = '正在保存…';
+        try {
+            const response = await this.apiRequest('/api/admin/domains', {
+                method: 'PUT',
+                body: JSON.stringify({ domains })
+            });
+            input.value = response.data.domains.join('\n');
+            this.availableDomains = response.data.domains;
+            this.batchPlanSignature = '';
+            await this.loadAvailableDomains();
+            status.textContent = '域名已保存并立即生效。';
+        } catch (error) {
+            status.textContent = '保存失败：' + error.message;
+        } finally {
+            save.disabled = false;
+            reload.disabled = false;
+            input.disabled = false;
         }
     }
 

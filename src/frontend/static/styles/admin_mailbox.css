@@ -1909,3 +1909,30 @@ code {
         animation: none !important;
     }
 }
+.domain-settings {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+
+.domain-settings textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    resize: vertical;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+}
+
+.domain-settings .setting-description,
+.domain-settings #domain-settings-status,
+.domain-settings small {
+    overflow-wrap: anywhere;
+}
+
+.domain-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 16px;
+}

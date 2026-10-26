@@ -30,7 +30,7 @@ check_docker() {
         log_error "Docker未安装，请先安装Docker"
         exit 1
     fi
-    
+
     if ! command -v docker-compose &> /dev/null; then
         log_error "Docker Compose未安装，请先安装Docker Compose"
         exit 1
@@ -42,21 +42,17 @@ check_config() {
     if [ ! -f ".env" ]; then
         log_warn ".env文件不存在，从模板创建..."
         cp .env.example .env
-        log_warn "请编辑 .env 文件配置你的域名和密码！"
+        log_warn "请编辑 .env 文件配置管理员密码；启动后在管理后台配置域名。"
         return 1
     fi
-    
+
     # 检查关键配置
-    if grep -q "yourdomain.com" .env; then
-        log_warn "请在 .env 文件中设置你的域名！"
-        return 1
-    fi
-    
+
     if grep -q "your_secure_password_here" .env; then
         log_warn "请在 .env 文件中设置安全的管理员密码！"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -64,23 +60,24 @@ check_config() {
 create_dirs() {
     log_info "创建数据目录..."
     mkdir -p data logs ssl
-    chmod 755 data logs
+    chmod 700 data
+    chmod 755 logs
 }
 
 # 启动服务
 start_service() {
     log_info "启动TempMail服务..."
-    docker-compose up -d
-    
+    docker-compose up -d --build
+
     log_info "等待服务启动..."
     sleep 10
-    
+
     # 检查服务状态
     if docker-compose ps | grep -q "Up"; then
         log_info "服务启动成功！"
-        log_info "Web界面: http://localhost:80"
-        log_info "API测试: http://localhost:80/api-test"
-        log_info "管理面板: http://localhost:80/admin"
+        log_info "Web界面: http://localhost:8081"
+        log_info "API测试: http://localhost:8081/api-test"
+        log_info "管理面板: http://localhost:8081/admin"
     else
         log_error "服务启动失败，请查看日志"
         docker-compose logs
@@ -115,7 +112,7 @@ update_service() {
 # 主函数
 main() {
     check_docker
-    
+
     case "${1:-start}" in
         start)
             create_dirs
