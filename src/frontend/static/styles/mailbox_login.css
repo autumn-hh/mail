@@ -1,5 +1,18 @@
 /* 登录页用编辑式双栏建立品牌；窄屏优先展示可操作的表单，而非装饰。 */
 .access-page { display: flex; min-height: 100vh; min-height: 100svh; flex-direction: column; }
+/* 管理员入口保持低调：默认无框，悬停时才浮现边界。 */
+.admin-entry {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+    border: 1px solid transparent; border-radius: var(--radius-md);
+    color: var(--text-muted); background: transparent; font: 600 13px/1 var(--font-sans);
+    cursor: pointer; transition: color var(--ease), border-color var(--ease), background var(--ease);
+}
+.admin-entry:hover { color: var(--primary); border-color: var(--border); background: var(--surface); }
+.admin-entry:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.admin-entry .icon { width: 18px; height: 18px; }
+.admin-login-dialog .dialog-card > .eyebrow { margin-bottom: 10px; }
+.admin-login-dialog h2 { margin: 0 0 24px; padding-right: 44px; font-size: 24px; }
+.admin-login-dialog form { margin: 0; }
 .header-actions { display: flex; align-items: center; gap: 24px; }
 .login-shell {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 456px);

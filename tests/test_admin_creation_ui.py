@@ -25,6 +25,48 @@ class AdminCreationUiTest(unittest.TestCase):
         self.assertIn("'register': { text: '自助创建'", script)
         self.assertIn("label: '自助创建'", script)
 
+    def test_domain_settings_nav_view_and_states_are_present(self):
+        html = read('src/frontend/templates/admin_mailbox.html')
+        script = read('src/frontend/static/scripts/admin_mailbox.js')
+        css = read('src/frontend/static/styles/admin_mailbox.css')
+
+        # 导航与视图沿用既有 data-view/id 契约。
+        self.assertIn('data-view="domains"', html)
+        self.assertIn('<span>域名设置</span>', html)
+        self.assertIn('id="domains-view"', html)
+        self.assertIn("viewName === 'domains'", script)
+
+        # 列表具备加载、空与错误三种状态。
+        self.assertIn('id="domains-list"', html)
+        self.assertIn('loading-row', html)
+        for state in ('loading-row', 'empty-row', 'error-row'):
+            with self.subTest(state=state):
+                self.assertRegex(script, rf"colspan=\"4\" class=\"{state}")
+        self.assertIn('暂无域名', script)
+
+        # 启停开关、删除确认与行内错误兜底沿用页面既有模式。
+        self.assertIn('role="switch"', script)
+        self.assertIn('aria-checked', script)
+        self.assertIn('confirmAdminAction({', script)
+        self.assertIn("title: '删除域名'", script)
+        self.assertIn('.domain-switch.is-on .domain-switch-track', css)
+
+    def test_domain_settings_use_the_admin_domains_api_contract(self):
+        script = read('src/frontend/static/scripts/admin_mailbox.js')
+
+        # 增删改查到 /api/admin/domains，路径参数统一 URL 编码。
+        self.assertIn('async domainRequest(', script)
+        self.assertIn("this.domainRequest('/api/admin/domains'", script)
+        self.assertEqual(script.count('/api/admin/domains/${encodeURIComponent(domain)}'), 2)
+        self.assertIn("method: 'PUT'", script)
+        self.assertIn("method: 'DELETE'", script)
+        self.assertIn('isValidDomainName(domain)', script)
+
+        # 域名变更后必须刷新邮箱创建表单的域名缓存。
+        self.assertIn('async refreshDomainData()', script)
+        self.assertIn('await this.loadDomainSettings();', script)
+        self.assertIn('await this.loadAvailableDomains();', script)
+
     def test_batch_creation_controls_and_feedback_are_present(self):
         html = read('src/frontend/templates/admin_mailbox.html')
         script = read('src/frontend/static/scripts/admin_mailbox.js')

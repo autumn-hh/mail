@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="auto" data-icon-sprite="{{ url_for('static', filename='icons/maildrop-icons.svg') }}">
+<html lang="zh-CN" data-theme="auto" data-icon-sprite="/static/icons/maildrop-icons.svg">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,22 +8,26 @@
     <meta name="description" content="Maildrop 临时邮箱访问入口，使用邮箱地址与密钥查看收件箱。">
     <title>访问邮箱 · Maildrop</title>
     <!-- 在首帧前恢复主题；不把凭据交给主题模块。 -->
-    <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/favicon.svg') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/ui_foundation.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/mailbox_login.css') }}">
+    <script src="/static/scripts/theme.js"></script>
+    <link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
+    <link rel="stylesheet" href="/static/styles/ui_foundation.css">
+    <link rel="stylesheet" href="/static/styles/mailbox_login.css">
 </head>
 <body class="access-page">
     <a class="skip-link" href="#login-form">跳到邮箱登录</a>
     <header class="page-topbar access-header">
         <a class="brand-link" href="/" aria-label="Maildrop 首页">
-            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#brand"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#brand"></use></svg>
             <span>Maildrop</span>
         </a>
         <div class="header-actions">
             <span class="brand-caption">A QUIET RECEIVING SPACE</span>
+            <button class="admin-entry" id="admin-entry" type="button" aria-haspopup="dialog" title="管理员登录">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#shield"></use></svg>
+                <span>管理员</span>
+            </button>
             <button class="icon-button" id="theme-toggle" type="button" aria-label="主题：跟随系统" title="切换主题">
-                <svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#theme"></use></svg>
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#theme"></use></svg>
             </button>
         </div>
     </header>
@@ -33,7 +37,7 @@
             <h1 id="page-title"><span>收件，</span><span class="hero-accent">简单一点。</span></h1>
             <p class="intro-copy">一个只收信的邮箱空间。<br>用邮箱地址和密钥，打开属于你的收件箱。</p>
             <!-- 装饰图只表达投递概念；不展示模拟邮件或虚构业务指标。 -->
-            <img class="delivery-illustration" src="{{ url_for('static', filename='resources/delivery-scene.svg') }}" alt="" width="520" height="240" aria-hidden="true">
+            <img class="delivery-illustration" src="/static/resources/delivery-scene.svg" alt="" width="520" height="240" aria-hidden="true">
             <p class="intro-footnote"><span class="quiet-line" aria-hidden="true"></span>不多一步，不多一份打扰。</p>
         </section>
         <section class="login-card" aria-labelledby="login-title">
@@ -46,7 +50,7 @@
                 <div class="field-group">
                     <label for="mailbox-address">邮箱地址</label>
                     <div class="input-shell">
-                        <svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#mail"></use></svg>
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#mail"></use></svg>
                         <input id="mailbox-address" name="address" type="email" inputmode="email" autocomplete="email" spellcheck="false" placeholder="name@example.com" required aria-describedby="address-error">
                     </div>
                     <p class="field-error" id="address-error" role="alert"></p>
@@ -54,22 +58,22 @@
                 <div class="field-group">
                     <label for="mailbox-key">邮箱密钥</label>
                     <div class="input-shell">
-                        <svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#key"></use></svg>
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#key"></use></svg>
                         <input id="mailbox-key" name="mailbox_key" type="password" autocomplete="off" minlength="6" maxlength="128" pattern="[A-Za-z0-9._~\-]{6,128}" title="仅支持字母、数字及 . _ ~ -，长度 6–128" placeholder="输入邮箱密钥" required aria-describedby="key-error">
                         <button class="password-toggle" id="password-toggle" type="button" aria-label="显示密钥" aria-pressed="false">
-                            <svg class="icon" aria-hidden="true"><use id="password-icon" href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#eye"></use></svg>
+                            <svg class="icon" aria-hidden="true"><use id="password-icon" href="/static/icons/maildrop-icons.svg#eye"></use></svg>
                         </button>
                     </div>
                     <p class="field-error" id="key-error" role="alert"></p>
                 </div>
                 <button class="primary-button" id="login-button" type="submit">
                     <span>进入收件箱</span>
-                    <svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#arrow-right"></use></svg>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#arrow-right"></use></svg>
                 </button>
             </form>
             <!-- 风险提示放在操作附近；移动端不再为大块介绍把主按钮挤出首屏。 -->
             <div class="privacy-note">
-                <svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#shield"></use></svg>
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#shield"></use></svg>
                 <p><strong>邮箱密钥不会写入本地存储。</strong><span>访问链接包含密钥，请勿在公共设备上保存或分享。</span></p>
             </div>
             <p class="keyboard-tip"><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Enter</kbd> 快速进入</p>
@@ -80,7 +84,34 @@
         <a href="/admin">管理员入口 <span aria-hidden="true">↗</span></a>
     </footer>
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <script src="{{ url_for('static', filename='scripts/ui_components.js') }}"></script>
-    <script src="{{ url_for('static', filename='scripts/mailbox_login.js') }}"></script>
+    <!-- 管理员入口弹窗与公开登录表单完全隔离，凭据只提交到 /api/admin_login。 -->
+    <dialog class="app-dialog ui-dialog ui-dialog--compact admin-login-dialog" id="admin-login-dialog" aria-modal="true" aria-labelledby="admin-login-title">
+        <div class="dialog-card">
+            <button class="dialog-close icon-button" type="button" data-dialog-close aria-label="关闭管理员登录">
+                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#close"></use></svg>
+            </button>
+            <p class="eyebrow">ADMIN ACCESS</p>
+            <h2 id="admin-login-title">管理员登录</h2>
+            <form id="admin-login-form" novalidate>
+                <div class="field-group">
+                    <label for="admin-login-password">管理员密码</label>
+                    <div class="input-shell">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#lock"></use></svg>
+                        <input id="admin-login-password" name="admin_password" type="password" autocomplete="current-password" maxlength="128" placeholder="输入管理员密码" required aria-describedby="admin-login-error">
+                        <button class="password-toggle" id="admin-password-toggle" type="button" aria-label="显示密码" aria-pressed="false">
+                            <svg class="icon" aria-hidden="true"><use id="admin-password-icon" href="/static/icons/maildrop-icons.svg#eye"></use></svg>
+                        </button>
+                    </div>
+                    <p class="field-error" id="admin-login-error" role="alert"></p>
+                </div>
+                <button class="primary-button" id="admin-login-submit" type="submit">
+                    <span>进入管理台</span>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#arrow-right"></use></svg>
+                </button>
+            </form>
+        </div>
+    </dialog>
+    <script src="/static/scripts/ui_components.js"></script>
+    <script src="/static/scripts/mailbox_login.js"></script>
 </body>
 </html>

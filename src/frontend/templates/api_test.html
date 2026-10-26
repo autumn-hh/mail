@@ -10,11 +10,11 @@
     <meta name="description" content="Maildrop 只读 API 调试台，用于安全检查邮箱信息与收件箱响应。">
     <title>只读 API 调试台 · Maildrop</title>
     <!-- 在首帧绘制前恢复主题，避免暗色偏好先闪出浅色界面。 -->
-    <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/favicon.svg') }}">
+    <script src="/static/scripts/theme.js"></script>
+    <link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
     <!-- 共享设计令牌先加载，页面 CSS 只负责调试台布局。 -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/ui_foundation.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/api_test.css') }}">
+    <link rel="stylesheet" href="/static/styles/ui_foundation.css">
+    <link rel="stylesheet" href="/static/styles/api_test.css">
 </head>
 <body class="api-debug-page">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -22,18 +22,18 @@
     <header class="page-topbar" aria-label="页面导航">
         <!-- 辅助名称包含可见品牌文字，避免语音与读屏操作名称不一致。 -->
         <a class="brand-link" href="/" aria-label="Maildrop / API，返回公开入口">
-            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#brand"></use></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#brand"></use></svg>
             <span>Maildrop <small class="brand-caption">/ API</small></span>
         </a>
         <nav class="top-actions" aria-label="快捷入口">
             <button class="soft-button soft-button-quiet" id="security-dialog-open" type="button" data-dialog-open="security-dialog">
-                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#shield"></use></svg>
+                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#shield"></use></svg>
                 <span>安全说明</span>
             </button>
             <a class="soft-button soft-button-quiet" href="/">公开入口</a>
             <a class="soft-button soft-button-quiet" href="/admin">管理后台</a>
             <button class="icon-button" id="theme-toggle" type="button" aria-label="切换明暗主题" title="切换主题">
-                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#sun"></use></svg>
+                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#sun"></use></svg>
             </button>
         </nav>
     </header>
@@ -47,9 +47,9 @@
             </div>
             <!-- 普通文字块使用原生内容，不给无语义角色的 div 额外命名。 -->
             <div class="hero-facts">
-                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#database"></use></svg>只读请求</span>
-                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#lock"></use></svg>凭据仅内存</span>
-                <span><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#code"></use></svg>文本化输出</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#database"></use></svg>只读请求</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#lock"></use></svg>凭据仅内存</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#code"></use></svg>文本化输出</span>
             </div>
         </section>
 
@@ -72,7 +72,7 @@
                         <label class="field" for="mailbox-address">
                             <span>邮箱地址</span>
                             <span class="input-shell">
-                                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#mail"></use></svg>
+                                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#mail"></use></svg>
                                 <input
                                     id="mailbox-address"
                                     name="address"
@@ -87,7 +87,7 @@
                         <label class="field" for="mailbox-key">
                             <span>邮箱密钥</span>
                             <span class="input-shell">
-                                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#key"></use></svg>
+                                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#key"></use></svg>
                                 <input
                                     id="mailbox-key"
                                     name="mailbox_key"
@@ -103,11 +103,11 @@
 
                     <div class="button-row">
                         <button id="auth-button" class="soft-button soft-button-primary" type="submit">
-                            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#lock"></use></svg>
+                            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#lock"></use></svg>
                             获取访问令牌
                         </button>
                         <button id="clear-session-button" class="soft-button soft-button-secondary" type="button">
-                            <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#close"></use></svg>
+                            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#close"></use></svg>
                             清空会话
                         </button>
                     </div>
@@ -133,14 +133,14 @@
 
                 <div class="request-options">
                     <button id="mailbox-info-button" class="request-card" type="button" disabled>
-                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#info"></use></svg></span>
+                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#info"></use></svg></span>
                         <span><strong>查询邮箱信息</strong><small>/api/mailbox_info_v2</small></span>
-                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#arrow-right"></use></svg>
+                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#arrow-right"></use></svg>
                     </button>
                     <button id="inbox-button" class="request-card" type="button" disabled>
-                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#inbox"></use></svg></span>
+                        <span class="request-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#inbox"></use></svg></span>
                         <span><strong>查询收件箱</strong><small>/api/get_inbox</small></span>
-                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#arrow-right"></use></svg>
+                        <svg class="ui-icon request-arrow" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#arrow-right"></use></svg>
                     </button>
                 </div>
             </section>
@@ -155,7 +155,7 @@
                         </div>
                     </div>
                     <button id="clear-output-button" class="soft-button soft-button-quiet" type="button">
-                        <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#trash"></use></svg>
+                        <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#trash"></use></svg>
                         清空输出
                     </button>
                 </div>
@@ -171,10 +171,10 @@
     <dialog class="app-dialog ui-dialog ui-dialog--medium" id="security-dialog" aria-labelledby="security-title">
         <div class="dialog-card">
             <button class="dialog-close icon-button" id="security-dialog-close" type="button" data-dialog-close="security-dialog" aria-label="关闭安全说明">
-                <svg class="ui-icon" aria-hidden="true"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#close"></use></svg>
+                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#close"></use></svg>
             </button>
             <div class="dialog-icon" aria-hidden="true">
-                <svg class="ui-icon"><use href="{{ url_for('static', filename='icons/maildrop-icons.svg') }}#shield"></use></svg>
+                <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#shield"></use></svg>
             </div>
             <p class="eyebrow">SECURITY BOUNDARY</p>
             <h2 id="security-title">调试台安全边界</h2>
@@ -189,7 +189,7 @@
             </div>
         </div>
     </dialog>
-    <script src="{{ url_for('static', filename='scripts/ui_components.js') }}"></script>
-    <script src="{{ url_for('static', filename='scripts/api_test.js') }}"></script>
+    <script src="/static/scripts/ui_components.js"></script>
+    <script src="/static/scripts/api_test.js"></script>
 </body>
 </html>

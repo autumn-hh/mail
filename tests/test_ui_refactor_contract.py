@@ -86,7 +86,7 @@ class UiRefactorContractTest(unittest.TestCase):
         admin = read('src/frontend/templates/admin_mailbox.html')
         self.assertNotIn('TempMail', admin)
         self.assertNotIn('role="button"', admin)
-        self.assertEqual(len(re.findall(r'<li><button[^>]+data-view=', admin)), 7)
+        self.assertEqual(len(re.findall(r'<li><button[^>]+data-view=', admin)), 8)
         self.assertNotIn('v1.0.0', admin)
         self.assertIn('服务端未提供', admin)
         sprite = ET.parse(STATIC_ROOT / 'icons' / 'maildrop-icons.svg').getroot()
@@ -194,6 +194,7 @@ class UiRefactorContractTest(unittest.TestCase):
             '/api/admin/security-config',
             '/api/admin/sub-admins',
             '/api/admin/blocked-ips',
+            '/api/admin/domains',
         ):
             with self.subTest(endpoint=endpoint):
                 self.assertIn(endpoint, admin_script)
@@ -358,6 +359,17 @@ class UiRefactorContractTest(unittest.TestCase):
             script = read(relative_path)
             with self.subTest(script=relative_path):
                 self.assertIn(expected, script)
+
+    def test_templates_are_backend_agnostic_and_jinja_free(self):
+        # 模板在 Flask 与 Go 后端下都按纯 HTML 提供，静态引用一律使用字面 /static 路径。
+        for template_path in sorted(TEMPLATE_ROOT.glob('*.html')):
+            html = template_path.read_text(encoding='utf-8')
+            with self.subTest(template=template_path.name):
+                self.assertNotIn('{{', html)
+                self.assertNotIn('{%', html)
+                self.assertNotIn('url_for', html)
+                self.assertIn('/static/scripts/ui_components.js', html)
+                self.assertIn('/static/icons/maildrop-icons.svg', html)
 
 
 if __name__ == '__main__':

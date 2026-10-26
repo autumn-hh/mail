@@ -2,6 +2,17 @@
 (function () {
     'use strict';
 
+    // 管理后台首帧前标记会话状态：有凭据即渲染后台框架，匿名访客不再
+    // 先绘制侧栏再由脚本摘除（首开重排，移动端尤为明显）。CSP 禁止内联
+    // 脚本，theme.js 是各页面同步引入的唯一头部脚本，因此标记置于此处。
+    try {
+        if (sessionStorage.getItem('admin_token')) {
+            document.documentElement.classList.add('admin-session');
+        }
+    } catch (error) {
+        // 存储不可用时退回脚本就位后再切换布局，仅多一次首开重排。
+    }
+
     const STORAGE_KEY = 'maildrop_theme';
     const THEMES = Object.freeze(['auto', 'light', 'dark']);
     const LABELS = Object.freeze({

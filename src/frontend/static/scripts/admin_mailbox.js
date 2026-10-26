@@ -114,14 +114,31 @@ class AdminMailboxManager {
     init() {
         // 检查是否已登录
         if (this.authToken) {
+            // 会话凭据存在时先进入主内容，避免登录页闪现；随后立即校验，失效即退回登录。
             this.showMainContent();
-            this.loadStats();
+            this.validateStoredToken();
         } else {
             this.showLoginView();
         }
 
         // 绑定事件
         this.bindEvents();
+    }
+
+    async validateStoredToken() {
+        // 与 login() 使用同一个统计接口验证凭据，失败时清空会话并回到登录视图。
+        try {
+            const response = await this.apiRequest('/api/admin/stats');
+            if (!response.success) {
+                throw new Error('认证失败');
+            }
+        } catch (error) {
+            console.error('会话凭据校验失败:', error);
+            this.authToken = null;
+            sessionStorage.removeItem('admin_token');
+            this.showLoginView();
+            this.showToast('warning', '管理员登录已失效，请重新登录');
+        }
     }
 
     startClock() {
@@ -247,6 +264,16 @@ class AdminMailboxManager {
                 input.addEventListener('change', () => this.refreshBatchPreview());
             }
         });
+
+        // 域名设置：添加表单与刷新按钮
+        const domainAddForm = document.getElementById('domain-add-form');
+        if (domainAddForm) {
+            domainAddForm.addEventListener('submit', (e) => this.handleDomainAdd(e));
+        }
+        const domainsRefreshBtn = document.getElementById('domains-refresh-btn');
+        if (domainsRefreshBtn) {
+            domainsRefreshBtn.addEventListener('click', () => this.loadDomainSettings());
+        }
     }
 
     async generateRandomEmailPrefix() {
@@ -329,6 +356,188 @@ class AdminMailboxManager {
             console.error('获取域名失败:', error);
             return [];
         }
+    }
+
+    isValidDomainName(domain) {
+        // 客户端只做基础主机名形状检查，权威性校验以后端为准。
+        return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(domain);
+    }
+
+    async domainRequest(url, options = {}) {
+        // 域名接口由 Go 后端提供；当前 Flask 未实现时返回 HTML 错误页而非 JSON。
+        // 非 JSON 失败统一给出中文兜底，不把解析异常暴露给管理员。
+        try {
+            return await this.apiRequest(url, options);
+        } catch (error) {
+            if (error instanceof SyntaxError) {
+                throw new Error('域名服务暂不可用，请稍后重试');
+            }
+            throw error;
+        }
+    }
+
+    async loadDomainSettings() {
+        const tbody = document.getElementById('domains-list');
+        if (!tbody) return;
+        tbody.innerHTML = `<tr><td colspan="4" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
+
+        try {
+            const response = await this.domainRequest('/api/admin/domains');
+            this.renderDomainList(response.data);
+        } catch (error) {
+            console.error('加载域名列表失败:', error);
+            tbody.innerHTML = '<tr><td colspan="4" class="error-row">加载失败，请稍后重试</td></tr>';
+            this.showToast('error', error.message || '加载域名列表失败');
+        }
+    }
+
+    renderDomainList(domains) {
+        const tbody = document.getElementById('domains-list');
+        if (!tbody) return;
+        const rows = Array.isArray(domains) ? domains : [];
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-row">暂无域名，请先添加</td></tr>';
+            tbody.onclick = null;
+            return;
+        }
+
+        tbody.innerHTML = rows.map((item, index) => {
+            const enabled = Boolean(item.enabled);
+            return `
+                <tr>
+                    <td data-label="域名"><span class="domain-name">${escapeHtml(item.domain)}</span></td>
+                    <td data-label="状态"><span class="status-badge ${enabled ? 'active' : 'disabled'}">${enabled ? '已启用' : '已禁用'}</span></td>
+                    <td data-label="创建时间">${escapeHtml(this.formatDomainTime(item.created_at))}</td>
+                    <td class="actions-cell">
+                        <div class="action-buttons">
+                            <button class="btn-icon domain-switch${enabled ? ' is-on' : ''}" type="button" role="switch" aria-checked="${enabled}" data-action="toggle" data-domain-index="${index}" title="${enabled ? '禁用' : '启用'}域名" aria-label="${enabled ? '禁用' : '启用'}域名 ${escapeHtml(item.domain)}">
+                                <span class="domain-switch-track" aria-hidden="true"><span class="domain-switch-thumb"></span></span>
+                            </button>
+                            <button class="btn-icon btn-danger" type="button" data-action="delete" data-domain-index="${index}" title="删除域名" aria-label="删除域名 ${escapeHtml(item.domain)}">
+                                ${uiIcon('trash')}
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // 使用索引从当前响应取原值，避免把未信任域名拼入 onclick JavaScript。
+        tbody.onclick = (event) => {
+            const button = event.target.closest('button[data-domain-index]');
+            if (!button || !tbody.contains(button)) return;
+
+            const item = rows[Number(button.dataset.domainIndex)];
+            if (!item || !item.domain) return;
+
+            if (button.dataset.action === 'toggle') {
+                this.setDomainEnabled(item.domain, !item.enabled, button);
+            } else if (button.dataset.action === 'delete') {
+                this.deleteDomain(item.domain, button);
+            }
+        };
+    }
+
+    async handleDomainAdd(event) {
+        event.preventDefault();
+        const input = document.getElementById('domain-add-input');
+        const submitButton = document.getElementById('domain-add-submit');
+        const domain = (input.value || '').trim().toLowerCase();
+
+        if (!domain) {
+            this.showToast('error', '请输入域名');
+            input.focus();
+            return;
+        }
+        if (!this.isValidDomainName(domain)) {
+            this.showToast('error', '域名格式不正确，请检查后重试');
+            input.focus();
+            return;
+        }
+
+        MaildropUI.setBusy(submitButton, true, '添加中...');
+        try {
+            await this.domainRequest('/api/admin/domains', {
+                method: 'POST',
+                body: JSON.stringify({ domain })
+            });
+            this.showToast('success', `域名 ${domain} 已添加`);
+            input.value = '';
+            await this.refreshDomainData();
+        } catch (error) {
+            console.error('添加域名失败:', error);
+            this.showToast('error', error.message || '添加域名失败');
+        } finally {
+            MaildropUI.setBusy(submitButton, false);
+        }
+    }
+
+    async setDomainEnabled(domain, enabled, opener) {
+        MaildropUI.setBusy(opener, true);
+        try {
+            await this.domainRequest(`/api/admin/domains/${encodeURIComponent(domain)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled })
+            });
+            this.showToast('success', enabled ? `域名 ${domain} 已启用` : `域名 ${domain} 已禁用`);
+            await this.refreshDomainData();
+        } catch (error) {
+            console.error('更新域名状态失败:', error);
+            this.showToast('error', error.message || '更新域名状态失败');
+            // 失败也要重新拉取列表，确保开关显示与后端状态一致。
+            await this.loadDomainSettings();
+        } finally {
+            MaildropUI.setBusy(opener, false);
+        }
+    }
+
+    async deleteDomain(domain, opener = document.activeElement) {
+        if (!await confirmAdminAction({
+            title: '删除域名',
+            message: `确定要删除域名 "${domain}" 吗？删除后新邮箱将无法使用该域名。`,
+            confirmLabel: '确认删除',
+            danger: true,
+            opener,
+        })) {
+            return;
+        }
+
+        try {
+            await this.domainRequest(`/api/admin/domains/${encodeURIComponent(domain)}`, {
+                method: 'DELETE'
+            });
+            this.showToast('success', `域名 ${domain} 已删除`);
+            await this.refreshDomainData();
+        } catch (error) {
+            console.error('删除域名失败:', error);
+            this.showToast('error', error.message || '删除域名失败');
+        }
+    }
+
+    async refreshDomainData() {
+        // 列表与邮箱创建表单的域名缓存同源，任何变更后都要一起刷新。
+        await this.loadDomainSettings();
+        await this.loadAvailableDomains();
+    }
+
+    formatDomainTime(value) {
+        // 域名时间字段兼容 Unix 秒与 ISO 字符串，无法解析时展示原文。
+        if (value === null || value === undefined || value === '') return '-';
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return this.formatDate(value);
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return String(value);
+        }
+        return parsed.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     }
     
     async login() {
@@ -420,6 +629,8 @@ class AdminMailboxManager {
             this.loadAuditLogs();
         } else if (viewName === 'sub-admins') {
             loadSubAdmins();
+        } else if (viewName === 'domains') {
+            this.loadDomainSettings();
         } else if (viewName === 'register') {
             this.resetRegisterView();
         }
@@ -1163,7 +1374,7 @@ class AdminMailboxManager {
             this.renderPagination(data);
         } catch (error) {
             console.error('加载邮箱列表失败:', error);
-            tbody.innerHTML = '<tr><td colspan="8" class="error-row">加载失败</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="error-row">加载失败</td></tr>';
             this.showToast('error', '加载邮箱列表失败');
         }
     }
