@@ -36,6 +36,15 @@ Push-Location $repoRoot
 try {
     # 将编译缓存放入系统临时目录，避免验证过程污染工作区。
     New-Item -ItemType Directory -Path $compileCache -Force | Out-Null
+    Invoke-CheckedStep '检查 Go 后端' {
+        go vet ./...
+    }
+    Invoke-CheckedStep '运行 Go 集成测试' {
+        go test ./... -count=1
+    }
+    Invoke-CheckedStep '构建 Go 服务（包含前端资源）' {
+        go build -o (Join-Path $compileCache 'maildrop.exe') ./cmd/maildrop
+    }
     $env:PYTHONPYCACHEPREFIX = $compileCache
     Invoke-CheckedStep '检查 Python 语法' {
         python -m compileall -q app.py config.py src tests

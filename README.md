@@ -5,6 +5,10 @@
 
 Maildrop is a self hostable and easy to use disposable email service that allows you to receive emails on a random email address on your domain.
 
+The backend now runs in **Go**: HTTP APIs, SMTP reception, MIME parsing, SQLite storage, and scheduled cleanup run in one binary with the existing frontend embedded. The homepage includes an **管理员登录** link. Manage receiving domains in **管理员后台 → 系统设置 → 邮箱域名设置**; changes persist in SQLite and take effect immediately.
+
+See [Go deployment and migration](docs/go-migration.md) for database compatibility, JSON import, rollback, and verification. Python files remain as legacy reference and regression fixtures; the Go service and Docker image do not run Python.
+
 **Now with V2 Features:**
 *   **Database Storage:** Robust SQLite support for better performance and data integrity.
 *   **Credential Access:** Mailbox key exchange followed by Bearer-token API access, with a separate admin password.
@@ -45,8 +49,7 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 
 ### Prerequisites
 
-- Python 3
-- pip
+- Go 1.26 or newer (or Docker Compose)
 
 ### Installation and running
 
@@ -57,37 +60,38 @@ Maildrop is a self hostable and easy to use disposable email service that allows
     cd mail
     ```
 
-2.  **Create a venv and activate it**
+2.  **Configure the service**
 
     ```bash
-    python -m venv venv
-    source venv/bin/activate
+    cp .env.example .env
     ```
 
-3.  **Install the requirements**
+    Set a strong administrator password in .env. Domains can be configured through the admin page after startup.
+
+3.  **Build the Go binary**
 
     ```bash
-    pip install -r requirements.txt
+    go build -o maildrop ./cmd/maildrop
     ```
 
 4.  **Run the application**
 
     ```bash
-    sudo python app.py
+    ./maildrop
     ```
 
-**The application must be run as root for the SMTP server to work**
+On Linux, port 25 requires appropriate privileges or a container. For local development, set SMTP_PORT=2525 in .env.
 
 ### Connecting to your domain
 
 1. Ensure port 25 is open as this is the port the email server uses. Some ISPs block this so you may need to use a tunnel or host maildrop in the cloud.
 2. Edit your domains dns settings and create an `A` record pointing to your public IP.
 3. Edit your domains dns settings and create an `MX` record pointing to the domain you made your `A` record on.
-4. Edit `.env` and change the domain to your domain.
+4. Open the homepage, choose **管理员登录**, and save your domains in **系统设置 → 邮箱域名设置**. DNS records must still be configured at your DNS provider.
 
 ### Running with docker
 
-Use this command to run maildrop in a docker container:
+Build the local Go image with `docker build -t maildrop-go:local .`, then run:
 ```
 sudo docker run \
   -d \
@@ -97,13 +101,14 @@ sudo docker run \
   -p 25:25 \
   -e DOMAIN="yourdomain.com" \
   -e PASSWORD="replace-with-a-strong-admin-password" \
-  autumuhh/mail:latest
+  -v ./data:/app/data \
+  maildrop-go:local
 ```
 Or if you prefer docker compose, Add this to your compose.yml file:
 ```
 services:
   maildrop:
-    image: autumuhh/mail:latest
+    build: .
     container_name: maildrop
     restart: unless-stopped
     ports:
@@ -114,7 +119,7 @@ services:
       - USE_DATABASE=true
       - PASSWORD=replace-with-a-strong-admin-password
 ```
-and then start it: `sudo docker compose up -d`
+and then start it: `docker compose up -d --build`. The repository's compose file publishes the web UI on port 8081 and persists `./data`.
 
 Set a strong `PASSWORD` in `.env` or the container environment before using `/admin`.
 If it is omitted, the management API intentionally stays locked instead of accepting a default password.

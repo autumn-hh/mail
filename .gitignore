@@ -7,5 +7,13 @@ data/*.json
 __pycache__/
 *.pyc
 
+# Go build and browser verification artifacts
+/maildrop
+/maildrop.exe
+/output/
+/.playwright-cli/
+data/*.db-shm
+data/*.db-wal
+
 # 三术项目记忆仅用于本地协作，避免把开发上下文提交到仓库
 .sanshu-memory/

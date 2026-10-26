@@ -671,6 +671,22 @@
                 </div>
 
                 <div class="settings-content">
+                    <div class="setting-group domain-settings">
+                        <h3>邮箱域名设置</h3>
+                        <p class="setting-description" id="domain-settings-help">每行填写一个接收邮件的域名。保存后立即用于新建邮箱和 SMTP 收信；移除域名不会删除已有邮件。DNS 的 MX 记录仍需在域名服务商处配置。</p>
+                        <form id="domain-settings-form">
+                            <div class="form-group">
+                                <label for="domain-settings-input">可用域名</label>
+                                <textarea id="domain-settings-input" rows="6" required spellcheck="false" autocomplete="off" placeholder="example.com&#10;mail.example.org" aria-describedby="domain-settings-help domain-settings-status" disabled></textarea>
+                                <small>支持 1–100 个域名，不含 https://、端口或路径。首个域名作为默认域名。</small>
+                            </div>
+                            <p id="domain-settings-status" role="status" aria-live="polite"></p>
+                            <div class="domain-settings-actions">
+                                <button type="submit" id="domain-settings-save" class="btn btn-primary" disabled>保存域名</button>
+                                <button type="button" id="domain-settings-reload" class="btn btn-secondary">重新加载</button>
+                            </div>
+                        </form>
+                    </div>
                     <div class="setting-group">
                         <h3>IP白名单设置</h3>
                         <p class="setting-description">管理允许访问系统的IP地址</p>
