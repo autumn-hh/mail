@@ -25,6 +25,8 @@ type Config struct {
 	UseDatabase           bool
 	ProtectedAddresses    string
 	Password              string
+	MCPAdminToken         string
+	MCPAllowedHosts       string
 	DomainsStr            string
 	Domains               []string
 	Domain                string
@@ -95,6 +97,7 @@ func FromLookupEnv(lookup func(string) (string, bool)) *Config {
 		return strings.ToLower(strings.TrimSpace(text(key, strconv.FormatBool(fallback)))) == "true"
 	}
 	c := &Config{
+		MCPAdminToken: strings.TrimSpace(text("MCP_ADMIN_TOKEN", "")), MCPAllowedHosts: text("MCP_ALLOWED_HOSTS", "localhost,127.0.0.1,::1"),
 		FlaskHost: text("FLASK_HOST", "0.0.0.0"), FlaskPort: integer("FLASK_PORT", 5000, 1, 65535),
 		TrustProxyHops: integer("TRUST_PROXY_HOPS", 0, 0, 10),
 		SMTPHost:       text("SMTP_HOST", "0.0.0.0"), SMTPPort: integer("SMTP_PORT", 25, 1, 65535),
