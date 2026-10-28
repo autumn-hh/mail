@@ -48,13 +48,13 @@ class UiRefactorContractTest(unittest.TestCase):
                     flags=re.IGNORECASE,
                 ))
 
-    def test_soft_ui_foundation_has_stable_tokens_and_accessibility_rules(self):
+    def test_editorial_foundation_has_stable_tokens_and_accessibility_rules(self):
         css = read('src/frontend/static/styles/ui_foundation.css').lower()
         token_patterns = {
-            '--bg-start': r'--bg-start\s*:\s*#eef3f1',
-            '--bg-end': r'--bg-end\s*:\s*#e5edea',
-            '--surface': r'--surface\s*:\s*#edf2f0',
-            '--primary': r'--primary\s*:\s*#2f746d',
+            '--bg-start': r'--bg-start\s*:\s*#f7f7f2',
+            '--bg-end': r'--bg-end\s*:\s*#f7f7f2',
+            '--surface': r'--surface\s*:\s*#ffffff',
+            '--primary': r'--primary\s*:\s*#236552',
             '--shadow-raised': r'--shadow-raised\s*:',
             '--shadow-inset': r'--shadow-inset\s*:',
             '--ease': r'--ease\s*:\s*180ms\b',
@@ -68,7 +68,8 @@ class UiRefactorContractTest(unittest.TestCase):
         self.assertRegex(css, r'@media\s*\(max-width:\s*768px\)')
         self.assertRegex(css, r'@media\s*\(max-width:\s*480px\)')
         self.assertIn('box-shadow: var(--shadow-raised)', css)
-        self.assertIn('box-shadow: var(--shadow-inset)', css)
+        # 平面表面不再依赖内凹阴影，浮层仍保留必要层次。
+        self.assertRegex(css, r'--shadow-inset\s*:\s*none')
 
         # 页面样式必须保留自己的窄屏排版，不能只依赖共享颜色变量。
         for _, (stylesheet_name, _) in PAGE_ASSETS.items():
@@ -76,6 +77,33 @@ class UiRefactorContractTest(unittest.TestCase):
             with self.subTest(stylesheet=stylesheet_name):
                 self.assertRegex(page_css, r'@media\s*\(max-width:')
                 self.assertIn('var(--', page_css)
+
+    def test_editorial_brand_theme_and_native_navigation_contracts(self):
+        # 首帧主题和原生导航是可用性契约，不因视觉迭代而退回。
+        for name in PAGE_ASSETS:
+            html = (TEMPLATE_ROOT / name).read_text(encoding='utf-8')
+            self.assertLess(html.index('scripts/theme.js'), html.index('styles/ui_foundation.css'))
+        admin = read('src/frontend/templates/admin_mailbox.html')
+        self.assertNotIn('TempMail', admin)
+        self.assertNotIn('role="button"', admin)
+        self.assertEqual(len(re.findall(r'<li><button[^>]+data-view=', admin)), 8)
+        self.assertNotIn('v1.0.0', admin)
+        self.assertIn('服务端未提供', admin)
+        sprite = ET.parse(STATIC_ROOT / 'icons' / 'maildrop-icons.svg').getroot()
+        self.assertTrue(any(node.attrib.get('id') == 'brand' for node in sprite.iter()))
+        for filename in ('icons/favicon.svg', 'resources/delivery-scene.svg'):
+            root = ET.parse(STATIC_ROOT / filename).getroot()
+            self.assertTrue(root.attrib.get('viewBox'))
+            self.assertFalse(any(node.tag.endswith('script') for node in root.iter()))
+        manager = read('src/frontend/static/scripts/mailbox_manager.js')
+        for marker in ('hasLoadedEmails', 'pendingReadIds', 'returnFocusId', 'data-focus-role', 'preventScroll: true'):
+            self.assertIn(marker, manager)
+        self.assertIn('previousIds.has', manager)
+        foundation = read('src/frontend/static/styles/ui_foundation.css')
+        self.assertIn('text-wrap: balance', foundation)
+        self.assertIn('input::placeholder,\ntextarea::placeholder', foundation)
+        manager_css = read('src/frontend/static/styles/mailbox_manager.css')
+        self.assertIn('.detail-heading .button { white-space: nowrap; }', manager_css)
 
     def test_no_font_awesome_or_external_font_assets_remain(self):
         active_assets = list(TEMPLATE_ROOT.glob('*.html'))
@@ -166,6 +194,9 @@ class UiRefactorContractTest(unittest.TestCase):
             '/api/admin/security-config',
             '/api/admin/sub-admins',
             '/api/admin/blocked-ips',
+            '/api/admin/domains',
+            '/api/admin/domains/batch-add',
+            '/api/admin/domains/batch-delete',
         ):
             with self.subTest(endpoint=endpoint):
                 self.assertIn(endpoint, admin_script)
@@ -249,6 +280,45 @@ class UiRefactorContractTest(unittest.TestCase):
         self.assertIn("aria-describedby", components)
         self.assertIn("data-dialog-description", admin_script)
 
+    def test_dialog_focus_and_busy_feedback_do_not_regress(self):
+        # 真实浏览器发现的退化留作契约，防止后续改版再次破坏。
+        components = read('src/frontend/static/scripts/ui_components.js')
+        self.assertIn("dialog.addEventListener('cancel', handleNativeDialogCancel)", components)
+        self.assertIn("dialog.addEventListener('keydown', handleDialogKeydown)", components)
+        self.assertIn('element.getClientRects().length', components)
+        self.assertIn('uiMinWidth', components)
+        manager = read('src/frontend/static/scripts/mailbox_manager.js')
+        self.assertIn('indexBeforeDelete', manager)
+        self.assertIn('confirmationPending', manager)
+        self.assertIn('pendingDeleteIds', manager)
+        admin = read('src/frontend/templates/admin_mailbox.html')
+        self.assertIn('aria-label="选择全部邮箱"', admin)
+        self.assertIn('aria-label="邮箱域名"', admin)
+        self.assertIn('role="region"', admin)
+        login = read('src/frontend/templates/mailbox_manager.html')
+        self.assertIn('aria-label="选择当前列表中的全部邮件"', login)
+
+    def test_visible_names_skip_targets_and_click_openers_do_not_regress(self):
+        # 读屏名称匹配、可见跳转目标与 WebKit 点击焦点均来自真实浏览器回归。
+        manager = read('src/frontend/static/scripts/mailbox_manager.js')
+        self.assertIn("readStatus.className = 'sr-only'", manager)
+        self.assertNotIn("openButton.setAttribute('aria-label'", manager)
+        self.assertNotIn('将当前邮件标记为', manager)
+        self.assertIn("setSkipTarget('auth-title')", manager)
+        self.assertIn("setSkipTarget('inbox-title')", manager)
+        self.assertIn("deleteOneEmail(id, deleteButton)", manager)
+        html = read('src/frontend/templates/mailbox_manager.html')
+        self.assertIn('id="auth-title" tabindex="-1"', html)
+        api = read('src/frontend/templates/api_test.html')
+        self.assertIn('aria-label="Maildrop / API，返回公开入口"', api)
+        admin = read('src/frontend/templates/admin_mailbox.html')
+        self.assertIn('aria-label="退出登录（管理员）"', admin)
+        self.assertIn('showCreateSubAdminModal(this)', admin)
+        admin_script = read('src/frontend/static/scripts/admin_mailbox.js')
+        self.assertIn('class="mailbox-shield-indicator" role="img"', admin_script)
+        components = read('src/frontend/static/scripts/ui_components.js')
+        self.assertIn('uiHadFocus', components)
+
     def test_shared_toasts_are_content_sized_and_compact(self):
         foundation = read('src/frontend/static/styles/ui_foundation.css')
 
@@ -271,11 +341,12 @@ class UiRefactorContractTest(unittest.TestCase):
         )
 
     def test_only_strict_credential_route_is_generated(self):
-        pages = read('src/backend/routes/pages.py')
-        routes = re.findall(r'@bp\.route\(["\']([^"\']+)["\']', pages)
-        self.assertEqual(routes.count('/web/<path:credential>'), 1)
-        self.assertNotIn('/mailbox', routes)
-        self.assertIn("credential.rsplit('----', 1)", pages)
+        # 页面路由由 Go 服务注册；凭据从最后一个分隔符拆分，避免邮箱 local-part 中的连字符干扰。
+        pages = read('internal/web/pages.go')
+        routes = re.findall(r'"(?:GET|HEAD) (/[^"]*)"', pages)
+        self.assertEqual(routes.count('/web/{credential...}'), 1)
+        self.assertFalse([route for route in routes if route.startswith('/mailbox')])
+        self.assertIn('strings.LastIndex(credential, "----")', pages)
 
         expected_builders = {
             'src/frontend/static/scripts/mailbox_login.js':
@@ -291,6 +362,17 @@ class UiRefactorContractTest(unittest.TestCase):
             script = read(relative_path)
             with self.subTest(script=relative_path):
                 self.assertIn(expected, script)
+
+    def test_templates_are_backend_agnostic_and_jinja_free(self):
+        # 模板在 Flask 与 Go 后端下都按纯 HTML 提供，静态引用一律使用字面 /static 路径。
+        for template_path in sorted(TEMPLATE_ROOT.glob('*.html')):
+            html = template_path.read_text(encoding='utf-8')
+            with self.subTest(template=template_path.name):
+                self.assertNotIn('{{', html)
+                self.assertNotIn('{%', html)
+                self.assertNotIn('url_for', html)
+                self.assertIn('/static/scripts/ui_components.js', html)
+                self.assertIn('/static/icons/maildrop-icons.svg', html)
 
 
 if __name__ == '__main__':

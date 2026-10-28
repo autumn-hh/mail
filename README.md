@@ -5,11 +5,8 @@
 
 Maildrop is a self hostable and easy to use disposable email service that allows you to receive emails on a random email address on your domain.
 
-The backend now runs in **Go**: HTTP APIs, SMTP reception, MIME parsing, SQLite storage, and scheduled cleanup run in one binary with the existing frontend embedded. The homepage includes an **管理员登录** link. Manage receiving domains in **管理员后台 → 系统设置 → 邮箱域名设置**; changes persist in SQLite and take effect immediately.
-
-See [Go deployment and migration](docs/go-migration.md) for database compatibility, JSON import, rollback, and verification. Python files remain as legacy reference and regression fixtures; the Go service and Docker image do not run Python.
-
 **Now with V2 Features:**
+*   **Single Go Binary:** Web UI, REST API and SMTP server in one self-contained executable.
 *   **Database Storage:** Robust SQLite support for better performance and data integrity.
 *   **Credential Access:** Mailbox key exchange followed by Bearer-token API access, with a separate admin password.
 *   **Enhanced API:** Comprehensive RESTful API V2 for integration and management.
@@ -36,7 +33,7 @@ See [Go deployment and migration](docs/go-migration.md) for database compatibili
 - [x] **Clean UI**
 - [x] **Easy setup**
 - [x] **RESTful API V2**
-- [x] **Admin Panel** for managing mailboxes and system settings
+- [x] **Admin Panel** for managing mailboxes, domains and system settings (admin login also available from the homepage)
 - [x] **Configurable Retention** (from minutes to permanent)
 
 ### Planned Features
@@ -47,9 +44,12 @@ See [Go deployment and migration](docs/go-migration.md) for database compatibili
 
 ## Running the application
 
+Maildrop is a single Go binary that runs the web UI/API, the SMTP server and the cleanup job.
+The frontend is embedded into the binary, and data is stored in SQLite (`data/mailbox.db`).
+
 ### Prerequisites
 
-- Go 1.26 or newer (or Docker Compose)
+- Go 1.26+ (only needed to build from source)
 
 ### Installation and running
 
@@ -60,38 +60,46 @@ See [Go deployment and migration](docs/go-migration.md) for database compatibili
     cd mail
     ```
 
-2.  **Configure the service**
+2.  **Configure**
 
     ```bash
     cp .env.example .env
+    # edit .env: set DOMAINS and a strong PASSWORD
     ```
 
-    Set a strong administrator password in .env. Domains can be configured through the admin page after startup.
-
-3.  **Build the Go binary**
+3.  **Build and run**
 
     ```bash
     go build -o maildrop ./cmd/maildrop
+    sudo ./maildrop
     ```
 
-4.  **Run the application**
+**Binding the SMTP port 25 requires root (or `CAP_NET_BIND_SERVICE`).**
 
-    ```bash
-    ./maildrop
-    ```
+### Managing domains
 
-On Linux, port 25 requires appropriate privileges or a container. For local development, set SMTP_PORT=2525 in .env.
+`DOMAINS` in `.env` only seeds the domain list on the very first start.
+After that, add, enable, disable or remove receiving domains in the admin panel (`/admin` → 域名设置);
+changes take effect immediately without a restart.
+
+### Upgrading from the Python version
+
+Stop the old service, back up `data/mailbox.db`, then start the Go binary with the same `.env` and `data/` directory.
+The database schema is migrated automatically on first start. JSON storage (`USE_DATABASE=false`) is no longer supported,
+and `FLASK_SECRET_KEY` is no longer used.
+
+For upgrades from the earlier Go branch, legacy saved domains and JSON import are preserved; see [merge migration notes](docs/go-migration.md). The service also retains `-healthcheck` and `/healthz`.
 
 ### Connecting to your domain
 
 1. Ensure port 25 is open as this is the port the email server uses. Some ISPs block this so you may need to use a tunnel or host maildrop in the cloud.
 2. Edit your domains dns settings and create an `A` record pointing to your public IP.
 3. Edit your domains dns settings and create an `MX` record pointing to the domain you made your `A` record on.
-4. Open the homepage, choose **管理员登录**, and save your domains in **系统设置 → 邮箱域名设置**. DNS records must still be configured at your DNS provider.
+4. Set `DOMAINS` in `.env` before the first start, or add the domain later in the admin panel (域名设置).
 
 ### Running with docker
 
-Build the local Go image with `docker build -t maildrop-go:local .`, then run:
+Use this command to run maildrop in a docker container:
 ```
 sudo docker run \
   -d \
@@ -101,25 +109,25 @@ sudo docker run \
   -p 25:25 \
   -e DOMAIN="yourdomain.com" \
   -e PASSWORD="replace-with-a-strong-admin-password" \
-  -v ./data:/app/data \
-  maildrop-go:local
+  autumuhh/mail:latest
 ```
 Or if you prefer docker compose, Add this to your compose.yml file:
 ```
 services:
   maildrop:
-    build: .
+    image: autumuhh/mail:latest
     container_name: maildrop
     restart: unless-stopped
     ports:
       - "5000:5000"
       - "25:25"
+    volumes:
+      - ./data:/app/data
     environment:
-      - DOMAIN=yourdomain.com
-      - USE_DATABASE=true
+      - DOMAINS=yourdomain.com
       - PASSWORD=replace-with-a-strong-admin-password
 ```
-and then start it: `docker compose up -d --build`. The repository's compose file publishes the web UI on port 8081 and persists `./data`.
+and then start it: `sudo docker compose up -d`
 
 Set a strong `PASSWORD` in `.env` or the container environment before using `/admin`.
 If it is omitted, the management API intentionally stays locked instead of accepting a default password.

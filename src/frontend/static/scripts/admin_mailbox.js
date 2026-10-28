@@ -16,6 +16,15 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+// 把国际化域名转换为与服务端一致的 Punycode 形式；无法解析时原样返回。
+function toAsciiDomain(domain) {
+    try {
+        return new URL(`http://${domain}`).hostname;
+    } catch (error) {
+        return domain;
+    }
+}
+
 // 仅允许安全字符进入 CSS 类名，避免审计操作名等外部字段突破 class 属性。
 function safeCssToken(value, fallback = 'unknown') {
     const token = String(value ?? '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
@@ -54,7 +63,7 @@ function confirmAdminAction({
         modal.innerHTML = `
             <div class="modal-content modal-content--compact">
                 <div class="modal-header">
-                    <h3>${uiIcon(danger ? 'warning' : 'question')} ${escapeHtml(title)}</h3>
+                    <h2>${uiIcon(danger ? 'warning' : 'question')} ${escapeHtml(title)}</h2>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                         ${uiIcon('close')}
                     </button>
@@ -93,6 +102,7 @@ class AdminMailboxManager {
         this.authToken = sessionStorage.getItem('admin_token');
         localStorage.removeItem('admin_token');
         this.currentView = 'login';
+        this.clockTimer = null;
         this.currentPage = 1;
         this.pageSize = 20;
         this.currentStatus = 'all';
@@ -107,20 +117,18 @@ class AdminMailboxManager {
         this.batchAddresses = [];
         this.batchPlanSignature = '';
 
+        // 域名批量删除的勾选集跨刷新保留，渲染时按现存域名裁剪。
+        this.selectedDomains = new Set();
+
         this.init();
     }
     
     init() {
-        document.getElementById('domain-settings-form').addEventListener('submit', (event) => {
-            event.preventDefault();
-            this.saveDomainSettings();
-        });
-        document.getElementById('domain-settings-reload').addEventListener('click', () => this.loadDomainSettings());
         // 检查是否已登录
         if (this.authToken) {
+            // 会话凭据存在时先进入主内容，避免登录页闪现；随后立即校验，失效即退回登录。
             this.showMainContent();
-            this.loadStats();
-            this.startClock();
+            this.validateStoredToken();
         } else {
             this.showLoginView();
         }
@@ -129,7 +137,25 @@ class AdminMailboxManager {
         this.bindEvents();
     }
 
+    async validateStoredToken() {
+        // 与 login() 使用同一个统计接口验证凭据，失败时清空会话并回到登录视图。
+        try {
+            const response = await this.apiRequest('/api/admin/stats');
+            if (!response.success) {
+                throw new Error('认证失败');
+            }
+        } catch (error) {
+            console.error('会话凭据校验失败:', error);
+            this.authToken = null;
+            sessionStorage.removeItem('admin_token');
+            this.showLoginView();
+            this.showToast('warning', '管理员登录已失效，请重新登录');
+        }
+    }
+
     startClock() {
+        // 登录前后共用一个时钟，避免重复计时器与首次登录时间空白。
+        if (this.clockTimer) return;
         const updateTime = () => {
             const now = new Date();
             const timeString = now.toLocaleString('zh-CN', {
@@ -147,7 +173,7 @@ class AdminMailboxManager {
             }
         };
         updateTime();
-        setInterval(updateTime, 1000);
+        this.clockTimer = setInterval(updateTime, 1000);
     }
     
     bindEvents() {
@@ -170,12 +196,8 @@ class AdminMailboxManager {
                 const view = e.currentTarget.dataset.view;
                 if (view) {
                     this.switchView(view);
-                }
-            });
-            item.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    item.click();
+                    // 键盘切换视图后进入标题，方便直接继续浏览内容。
+                    if (e.detail === 0) document.querySelector(`#${view}-view h1`)?.focus({ preventScroll: true });
                 }
             });
         });
@@ -254,6 +276,30 @@ class AdminMailboxManager {
                 input.addEventListener('change', () => this.refreshBatchPreview());
             }
         });
+
+        // 域名设置：添加表单与刷新按钮
+        const domainAddForm = document.getElementById('domain-add-form');
+        if (domainAddForm) {
+            domainAddForm.addEventListener('submit', (e) => this.handleDomainAdd(e));
+        }
+        const domainAddInput = document.getElementById('domain-add-input');
+        if (domainAddInput) {
+            domainAddInput.addEventListener('input', () => this.updateDomainAddCount());
+        }
+        const domainSelectAll = document.getElementById('domains-select-all');
+        if (domainSelectAll) {
+            domainSelectAll.addEventListener('change', () => this.toggleDomainSelectAll(domainSelectAll.checked));
+        }
+        const domainsBatchDeleteBtn = document.getElementById('domains-batch-delete-btn');
+        if (domainsBatchDeleteBtn) {
+            domainsBatchDeleteBtn.addEventListener('click', () => this.deleteSelectedDomains(domainsBatchDeleteBtn));
+        }
+        this.updateDomainAddCount();
+        this.updateDomainSelectionUi();
+        const domainsRefreshBtn = document.getElementById('domains-refresh-btn');
+        if (domainsRefreshBtn) {
+            domainsRefreshBtn.addEventListener('click', () => this.loadDomainSettings());
+        }
     }
 
     async generateRandomEmailPrefix() {
@@ -337,8 +383,387 @@ class AdminMailboxManager {
             return [];
         }
     }
+
+    async domainRequest(url, options = {}) {
+        // 域名接口由 Go 后端提供；当前 Flask 未实现时返回 HTML 错误页而非 JSON。
+        // 非 JSON 失败统一给出中文兜底，不把解析异常暴露给管理员。
+        try {
+            return await this.apiRequest(url, options);
+        } catch (error) {
+            if (error instanceof SyntaxError) {
+                throw new Error('域名服务暂不可用，请稍后重试');
+            }
+            throw error;
+        }
+    }
+
+    async loadDomainSettings() {
+        const tbody = document.getElementById('domains-list');
+        if (!tbody) return;
+        tbody.innerHTML = `<tr><td colspan="5" class="loading-row">${uiIcon('spinner', 'is-spinning')} 加载中...</td></tr>`;
+
+        try {
+            const response = await this.domainRequest('/api/admin/domains');
+            this.renderDomainList(response.data);
+        } catch (error) {
+            console.error('加载域名列表失败:', error);
+            tbody.innerHTML = '<tr><td colspan="5" class="error-row">加载失败，请稍后重试</td></tr>';
+            this.showToast('error', error.message || '加载域名列表失败');
+        }
+    }
+
+    renderDomainList(domains) {
+        const tbody = document.getElementById('domains-list');
+        if (!tbody) return;
+        const rows = Array.isArray(domains) ? domains : [];
+
+        // 每次刷新都把勾选裁剪到仍存在的域名，避免刚删除的项留在批量删除集里。
+        const existing = new Set(rows.map(item => String(item.domain ?? '')).filter(Boolean));
+        this.selectedDomains = new Set([...this.selectedDomains].filter(domain => existing.has(domain)));
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-row">暂无域名，请先添加</td></tr>';
+            tbody.onclick = null;
+            tbody.onchange = null;
+            this.updateDomainSelectionUi();
+            return;
+        }
+
+        tbody.innerHTML = rows.map((item, index) => {
+            const enabled = Boolean(item.enabled);
+            const selected = this.selectedDomains.has(String(item.domain ?? ''));
+            return `
+                <tr>
+                    <td class="domain-select-cell">
+                        <label class="table-select"><input type="checkbox" class="domain-checkbox" value="${escapeHtml(item.domain)}" aria-label="选择域名 ${escapeHtml(item.domain)}"${selected ? ' checked' : ''}></label>
+                    </td>
+                    <td data-label="域名"><span class="domain-name">${escapeHtml(item.domain)}</span></td>
+                    <td data-label="状态"><span class="status-badge ${enabled ? 'active' : 'disabled'}">${enabled ? '已启用' : '已禁用'}</span></td>
+                    <td data-label="创建时间">${escapeHtml(this.formatDomainTime(item.created_at))}</td>
+                    <td class="actions-cell">
+                        <div class="action-buttons">
+                            <button class="btn-icon domain-switch${enabled ? ' is-on' : ''}" type="button" role="switch" aria-checked="${enabled}" data-action="toggle" data-domain-index="${index}" title="${enabled ? '禁用' : '启用'}域名" aria-label="${enabled ? '禁用' : '启用'}域名 ${escapeHtml(item.domain)}">
+                                <span class="domain-switch-track" aria-hidden="true"><span class="domain-switch-thumb"></span></span>
+                            </button>
+                            <button class="btn-icon btn-danger" type="button" data-action="delete" data-domain-index="${index}" title="删除域名" aria-label="删除域名 ${escapeHtml(item.domain)}">
+                                ${uiIcon('trash')}
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // 使用索引从当前响应取原值，避免把未信任域名拼入 onclick JavaScript。
+        tbody.onclick = (event) => {
+            const button = event.target.closest('button[data-domain-index]');
+            if (!button || !tbody.contains(button)) return;
+
+            const item = rows[Number(button.dataset.domainIndex)];
+            if (!item || !item.domain) return;
+
+            if (button.dataset.action === 'toggle') {
+                this.setDomainEnabled(item.domain, !item.enabled, button);
+            } else if (button.dataset.action === 'delete') {
+                this.deleteDomain(item.domain, button);
+            }
+        };
+        // 勾选变化走 change 委托，键盘切换与鼠标点击走同一条路径。
+        tbody.onchange = (event) => {
+            const checkbox = event.target.closest('input.domain-checkbox');
+            if (!checkbox || !tbody.contains(checkbox)) return;
+            this.setDomainSelected(checkbox.value, checkbox.checked);
+        };
+        this.updateDomainSelectionUi();
+    }
+
+    setDomainSelected(domain, selected) {
+        const value = String(domain ?? '');
+        if (!value) return;
+        if (selected) {
+            this.selectedDomains.add(value);
+        } else {
+            this.selectedDomains.delete(value);
+        }
+        this.updateDomainSelectionUi();
+    }
+
+    toggleDomainSelectAll(checked) {
+        // 表头全选只作用于当前渲染行，勾选集仍按域名原值维护。
+        const checkboxes = document.querySelectorAll('#domains-list .domain-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = checked;
+            if (checked) {
+                this.selectedDomains.add(cb.value);
+            } else {
+                this.selectedDomains.delete(cb.value);
+            }
+        });
+        this.updateDomainSelectionUi();
+    }
+
+    updateDomainSelectionUi() {
+        const count = this.selectedDomains.size;
+        const selectAll = document.getElementById('domains-select-all');
+        const rowCount = document.querySelectorAll('#domains-list .domain-checkbox').length;
+        if (selectAll) {
+            selectAll.disabled = rowCount === 0;
+            selectAll.checked = rowCount > 0 && count === rowCount;
+            selectAll.indeterminate = count > 0 && count < rowCount;
+        }
+        const summary = document.getElementById('domains-selected-summary');
+        if (summary) {
+            summary.textContent = `已选择 ${count} 个域名`;
+        }
+        const countEl = document.getElementById('domains-batch-delete-count');
+        if (countEl) {
+            countEl.textContent = String(count);
+        }
+        const deleteButton = document.getElementById('domains-batch-delete-btn');
+        if (deleteButton) {
+            deleteButton.disabled = count === 0;
+        }
+    }
+
+    parseDomainEntries(raw) {
+        // 换行、逗号、分号与空白都视为分隔符；提交前统一小写、去尾点并去重。
+        const seen = new Set();
+        const entries = [];
+        String(raw ?? '').split(/[\s,;，；]+/u).forEach(piece => {
+            const normalized = piece.trim().toLowerCase().replace(/\.$/, '');
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            entries.push(normalized);
+        });
+        return entries;
+    }
+
+    updateDomainAddCount() {
+        const input = document.getElementById('domain-add-input');
+        if (!input) return;
+        const count = this.parseDomainEntries(input.value).length;
+        const countEl = document.getElementById('domain-add-count');
+        if (countEl) {
+            countEl.textContent = `将添加 ${count} 个域名`;
+        }
+        // 超过后端上限时在表单内联提示，并锁定提交避免必然失败请求。
+        const limitEl = document.getElementById('domain-add-limit');
+        if (limitEl) {
+            limitEl.hidden = count <= 200;
+        }
+        const submitButton = document.getElementById('domain-add-submit');
+        if (submitButton) {
+            submitButton.disabled = count === 0 || count > 200;
+        }
+    }
+
+    async handleDomainAdd(event) {
+        event.preventDefault();
+        const input = document.getElementById('domain-add-input');
+        const submitButton = document.getElementById('domain-add-submit');
+        const domains = this.parseDomainEntries(input.value);
+
+        if (domains.length === 0) {
+            this.showToast('error', '请输入域名');
+            input.focus();
+            return;
+        }
+        if (domains.length > 200) {
+            this.showToast('error', '单次最多添加 200 个域名，请分批提交');
+            input.focus();
+            return;
+        }
+
+        MaildropUI.setBusy(submitButton, true, '添加中...');
+        try {
+            // 一律走批量接口，单个域名也是长度为 1 的批量。
+            const response = await this.domainRequest('/api/admin/domains/batch-add', {
+                method: 'POST',
+                body: JSON.stringify({ domains })
+            });
+            const data = response.data || {};
+            const added = Array.isArray(data.added) ? data.added : [];
+            const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+            this.renderDomainResult({ type: 'add', added, skipped });
+            this.showToast(
+                added.length > 0 ? 'success' : 'warning',
+                skipped.length > 0 ? `已添加 ${added.length} 个域名，跳过 ${skipped.length} 个` : `已添加 ${added.length} 个域名`
+            );
+            // 只移除实际添加成功的域名，被跳过的留在输入框里便于管理员修正。
+            const addedSet = new Set(added.map(item => String(item.domain ?? '')));
+            // 服务端把中文等国际化域名规范为 Punycode，比较前用 URL 解析转换成同样的 ASCII 形式。
+            input.value = domains.filter(domain => !addedSet.has(toAsciiDomain(domain))).join('\n');
+            if (added.length > 0) {
+                await this.refreshDomainData();
+            }
+        } catch (error) {
+            console.error('添加域名失败:', error);
+            this.showToast('error', error.message || '添加域名失败');
+            this.renderDomainResult({ type: 'error', message: error.message || '添加域名失败' });
+        } finally {
+            MaildropUI.setBusy(submitButton, false);
+            this.updateDomainAddCount();
+        }
+    }
+
+    async deleteSelectedDomains(opener = document.activeElement) {
+        const selected = [...this.selectedDomains];
+        if (selected.length === 0) {
+            this.showToast('warning', '请先选择要删除的域名');
+            return;
+        }
+
+        // 确认弹窗最多列 10 个域名，更多时折叠为「等 N 个」。
+        const preview = selected.slice(0, 10).join('、');
+        const suffix = selected.length > 10 ? ` 等 ${selected.length} 个` : '';
+        if (!await confirmAdminAction({
+            title: '批量删除域名',
+            message: `确定要删除选中的 ${selected.length} 个域名（${preview}${suffix}）吗？删除后新邮箱将无法使用这些域名。`,
+            confirmLabel: '确认删除',
+            danger: true,
+            opener,
+        })) {
+            return;
+        }
+
+        const deleteButton = document.getElementById('domains-batch-delete-btn');
+        MaildropUI.setBusy(deleteButton, true, '删除中...');
+        try {
+            const response = await this.domainRequest('/api/admin/domains/batch-delete', {
+                method: 'POST',
+                body: JSON.stringify({ domains: selected })
+            });
+            const data = response.data || {};
+            const deleted = Array.isArray(data.deleted) ? data.deleted : [];
+            const failed = Array.isArray(data.failed) ? data.failed : [];
+            this.renderDomainResult({ type: 'delete', deleted, failed });
+            this.showToast(
+                failed.length > 0 ? 'warning' : 'success',
+                failed.length > 0 ? `已删除 ${deleted.length} 个域名，${failed.length} 个失败` : `已删除 ${deleted.length} 个域名`
+            );
+            deleted.forEach(domain => this.selectedDomains.delete(String(domain)));
+            await this.refreshDomainData();
+        } catch (error) {
+            // 后端整体拒绝（如保留至少一个启用域名）时原样展示错误，列表与勾选保持不变。
+            console.error('批量删除域名失败:', error);
+            this.showToast('error', error.message || '批量删除域名失败');
+            this.renderDomainResult({ type: 'error', message: error.message || '批量删除域名失败' });
+        } finally {
+            MaildropUI.setBusy(deleteButton, false);
+            this.updateDomainSelectionUi();
+        }
+    }
+
+    renderDomainResult(result) {
+        // 结果面板常驻视图内，可手动关闭；服务端域名与原因统一转义后渲染。
+        const panel = document.getElementById('domains-result');
+        if (!panel) return;
+        let body = '';
+        if (result.type === 'add') {
+            const added = Array.isArray(result.added) ? result.added : [];
+            const skipped = Array.isArray(result.skipped) ? result.skipped : [];
+            panel.className = `domain-result is-${skipped.length > 0 ? 'warning' : 'success'}`;
+            body = `<p class="domain-result-title">${uiIcon(skipped.length > 0 ? 'alert-triangle' : 'check-circle')} 已添加 ${added.length} 个域名</p>`;
+            if (skipped.length > 0) {
+                body += `<p class="domain-result-subtitle">跳过 ${skipped.length} 个：</p><ul class="domain-result-list">`
+                    + skipped.map(item => `<li><code>${escapeHtml(item.domain)}</code><span class="domain-result-reason">${escapeHtml(item.reason)}</span></li>`).join('')
+                    + '</ul>';
+            }
+        } else if (result.type === 'delete') {
+            const deleted = Array.isArray(result.deleted) ? result.deleted : [];
+            const failed = Array.isArray(result.failed) ? result.failed : [];
+            panel.className = `domain-result is-${failed.length > 0 ? 'warning' : 'success'}`;
+            body = `<p class="domain-result-title">${uiIcon(failed.length > 0 ? 'alert-triangle' : 'check-circle')} 已删除 ${deleted.length} 个域名</p>`;
+            if (failed.length > 0) {
+                body += `<p class="domain-result-subtitle">失败 ${failed.length} 个：</p><ul class="domain-result-list">`
+                    + failed.map(item => `<li><code>${escapeHtml(item.domain)}</code><span class="domain-result-reason">${escapeHtml(item.reason)}</span></li>`).join('')
+                    + '</ul>';
+            }
+        } else {
+            panel.className = 'domain-result is-error';
+            body = `<p class="domain-result-title">${uiIcon('alert-circle')} ${escapeHtml(result.message)}</p>`;
+        }
+        panel.innerHTML = `
+            <div class="domain-result-body">${body}</div>
+            <button class="btn-icon domain-result-close" type="button" title="关闭结果提示" aria-label="关闭结果提示">${uiIcon('close')}</button>
+        `;
+        panel.hidden = false;
+        panel.querySelector('.domain-result-close').addEventListener('click', () => {
+            panel.hidden = true;
+            panel.replaceChildren();
+        });
+    }
+
+    async setDomainEnabled(domain, enabled, opener) {
+        MaildropUI.setBusy(opener, true);
+        try {
+            await this.domainRequest(`/api/admin/domains/${encodeURIComponent(domain)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled })
+            });
+            this.showToast('success', enabled ? `域名 ${domain} 已启用` : `域名 ${domain} 已禁用`);
+            await this.refreshDomainData();
+        } catch (error) {
+            console.error('更新域名状态失败:', error);
+            this.showToast('error', error.message || '更新域名状态失败');
+            // 失败也要重新拉取列表，确保开关显示与后端状态一致。
+            await this.loadDomainSettings();
+        } finally {
+            MaildropUI.setBusy(opener, false);
+        }
+    }
+
+    async deleteDomain(domain, opener = document.activeElement) {
+        if (!await confirmAdminAction({
+            title: '删除域名',
+            message: `确定要删除域名 "${domain}" 吗？删除后新邮箱将无法使用该域名。`,
+            confirmLabel: '确认删除',
+            danger: true,
+            opener,
+        })) {
+            return;
+        }
+
+        try {
+            await this.domainRequest(`/api/admin/domains/${encodeURIComponent(domain)}`, {
+                method: 'DELETE'
+            });
+            this.showToast('success', `域名 ${domain} 已删除`);
+            await this.refreshDomainData();
+        } catch (error) {
+            console.error('删除域名失败:', error);
+            this.showToast('error', error.message || '删除域名失败');
+        }
+    }
+
+    async refreshDomainData() {
+        // 列表与邮箱创建表单的域名缓存同源，任何变更后都要一起刷新。
+        await this.loadDomainSettings();
+        await this.loadAvailableDomains();
+    }
+
+    formatDomainTime(value) {
+        // 域名时间字段兼容 Unix 秒与 ISO 字符串，无法解析时展示原文。
+        if (value === null || value === undefined || value === '') return '-';
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return this.formatDate(value);
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return String(value);
+        }
+        return parsed.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
     
     async login() {
+        const loginButton = document.querySelector('#login-form button[type=submit]');
+        if (loginButton.disabled) return;
         const password = document.getElementById('admin-password').value;
         const errorDiv = document.getElementById('login-error');
         
@@ -351,7 +776,8 @@ class AdminMailboxManager {
         this.authToken = password;
         sessionStorage.setItem('admin_token', password);
         
-        // 验证token
+        // 真实认证等待期间锁定操作，避免重复请求与布局跳动。
+        MaildropUI.setBusy(loginButton, true, '验证中…');
         try {
             const response = await this.apiRequest('/api/admin/stats');
             if (response.success) {
@@ -364,6 +790,8 @@ class AdminMailboxManager {
             this.authToken = null;
             sessionStorage.removeItem('admin_token');
             this.showError(errorDiv, '密码错误');
+        } finally {
+            MaildropUI.setBusy(loginButton, false);
         }
     }
     
@@ -385,13 +813,18 @@ class AdminMailboxManager {
     showMainContent() {
         document.getElementById('login-view').style.display = 'none';
         document.querySelector('.sidebar').style.display = 'flex';
+        this.startClock();
         this.switchView('dashboard');
     }
     
     switchView(viewName) {
         // 更新导航状态
         document.querySelectorAll('.nav-item').forEach(item => {
-            item.classList.toggle('active', item.dataset.view === viewName);
+            const active = item.dataset.view === viewName;
+            item.classList.toggle('active', active);
+            // 视觉选中态同时传达给读屏，内部 register 标识不变。
+            if (active) item.setAttribute('aria-current', 'page');
+            else item.removeAttribute('aria-current');
         });
 
         // 更新视图显示
@@ -417,62 +850,10 @@ class AdminMailboxManager {
             this.loadAuditLogs();
         } else if (viewName === 'sub-admins') {
             loadSubAdmins();
+        } else if (viewName === 'domains') {
+            this.loadDomainSettings();
         } else if (viewName === 'register') {
             this.resetRegisterView();
-        } else if (viewName === 'settings') {
-            this.loadDomainSettings();
-        }
-    }
-
-    async loadDomainSettings() {
-        const input = document.getElementById('domain-settings-input');
-        const save = document.getElementById('domain-settings-save');
-        const status = document.getElementById('domain-settings-status');
-        input.disabled = true;
-        save.disabled = true;
-        status.textContent = '正在加载域名…';
-        try {
-            const response = await this.apiRequest('/api/admin/domains');
-            input.value = response.data.domains.join('\n');
-            input.disabled = false;
-            save.disabled = false;
-            status.textContent = '域名配置已加载。';
-        } catch (error) {
-            status.textContent = '加载失败：' + error.message;
-        }
-    }
-
-    async saveDomainSettings() {
-        const input = document.getElementById('domain-settings-input');
-        const save = document.getElementById('domain-settings-save');
-        const reload = document.getElementById('domain-settings-reload');
-        const status = document.getElementById('domain-settings-status');
-        const domains = input.value.split(/[\r\n,]+/).map(value => value.trim()).filter(Boolean);
-        if (!domains.length || domains.length > 100) {
-            status.textContent = '请填写 1–100 个域名。';
-            input.focus();
-            return;
-        }
-        save.disabled = true;
-        reload.disabled = true;
-        input.disabled = true;
-        status.textContent = '正在保存…';
-        try {
-            const response = await this.apiRequest('/api/admin/domains', {
-                method: 'PUT',
-                body: JSON.stringify({ domains })
-            });
-            input.value = response.data.domains.join('\n');
-            this.availableDomains = response.data.domains;
-            this.batchPlanSignature = '';
-            await this.loadAvailableDomains();
-            status.textContent = '域名已保存并立即生效。';
-        } catch (error) {
-            status.textContent = '保存失败：' + error.message;
-        } finally {
-            save.disabled = false;
-            reload.disabled = false;
-            input.disabled = false;
         }
     }
 
@@ -950,7 +1331,7 @@ class AdminMailboxManager {
             result.innerHTML = `
                 <div class="success-message">
                     ${uiIcon('check-circle')}
-                    <h3>邮箱创建成功！</h3>
+                    <h2>邮箱创建成功！</h2>
                 </div>
                 <div class="mailbox-info">
                     <div class="info-item">
@@ -1093,7 +1474,7 @@ class AdminMailboxManager {
                 result.innerHTML = `
                     <div class="success-message batch-completion-message ${completionType}">
                         ${uiIcon(completionIcon)}
-                        <h3>${completionTitle}</h3>
+                        <h2>${completionTitle}</h2>
                         <p class="batch-completion-text">已完成 ${total}/${total}</p>
                     </div>
 
@@ -1181,6 +1562,7 @@ class AdminMailboxManager {
             const response = await this.apiRequest('/api/admin/stats');
             const stats = response.data;
             
+            document.getElementById('stats-status').textContent = '统计已更新';
             document.getElementById('stat-total-mailboxes').textContent = stats.total_mailboxes;
             document.getElementById('stat-active-mailboxes').textContent = stats.active_mailboxes;
             document.getElementById('stat-expired-mailboxes').textContent = stats.expired_mailboxes;
@@ -1213,7 +1595,7 @@ class AdminMailboxManager {
             this.renderPagination(data);
         } catch (error) {
             console.error('加载邮箱列表失败:', error);
-            tbody.innerHTML = '<tr><td colspan="8" class="error-row">加载失败</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="error-row">加载失败</td></tr>';
             this.showToast('error', '加载邮箱列表失败');
         }
     }
@@ -1247,12 +1629,13 @@ class AdminMailboxManager {
             return `
                 <tr>
                     <td>
-                        <input type="checkbox" class="mailbox-checkbox" value="${escapeHtml(mailbox.id)}">
+                        <!-- 扩大复选操作区域，不改变批量选择的数据契约。 -->
+                        <label class="table-select"><input type="checkbox" class="mailbox-checkbox" aria-label="选择邮箱 ${escapeHtml(mailbox.address)}" value="${escapeHtml(mailbox.id)}"></label>
                     </td>
                     <td data-label="邮箱地址">
                         <div class="mailbox-address">
                             <span class="mailbox-address-text" title="${escapeHtml(mailbox.address)}">${escapeHtml(mailbox.address)}</span>
-                            ${mailbox.whitelist_enabled ? `<span class="mailbox-shield-indicator" title="已启用白名单" aria-label="已启用白名单">${uiIcon('shield', 'mailbox-shield-icon')}</span>` : ''}
+                            ${mailbox.whitelist_enabled ? `<!-- 白名单是纯图标提示，需要图像角色让辅助名称生效。 --><span class="mailbox-shield-indicator" role="img" title="已启用白名单" aria-label="已启用白名单">${uiIcon('shield', 'mailbox-shield-icon')}</span>` : ''}
                         </div>
                     </td>
                     <td data-label="状态"><span class="status-badge ${statusClass}">${statusText}</span></td>
@@ -1292,11 +1675,11 @@ class AdminMailboxManager {
             if (!mailbox) return;
 
             if (button.dataset.action === 'view') {
-                this.viewMailbox(mailbox.id);
+                this.viewMailbox(mailbox.id, button);
             } else if (button.dataset.action === 'edit') {
-                this.editMailbox(mailbox.id);
+                this.editMailbox(mailbox.id, button);
             } else if (button.dataset.action === 'delete') {
-                this.deleteMailbox(mailbox.id);
+                this.deleteMailbox(mailbox.id, button);
             }
         };
         tbody.onchange = (event) => {
@@ -1427,7 +1810,7 @@ function showTokenModal(mailbox) {
     modal.innerHTML = `
         <div class="modal-content modal-content--compact">
             <div class="modal-header">
-                <h3>邮箱创建成功</h3>
+                <h2>邮箱创建成功</h2>
             </div>
             <div class="modal-body">
                 <div class="token-display">
@@ -1478,9 +1861,10 @@ function copyToClipboard(text) {
 }
 
 // 添加到AdminMailboxManager类
-AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
+AdminMailboxManager.prototype.viewMailbox = async function(mailboxId, opener = document.activeElement) {
     // 在异步详情请求前保存列表触发按钮，后续串联确认框时才能把焦点还给原位置。
-    const viewOpener = document.activeElement;
+    // WebKit 鼠标点击不保证聚焦按钮，使用调用方提供的真实触发元素。
+    const viewOpener = opener;
     try {
         const response = await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`);
         const mailbox = response.data;
@@ -1497,7 +1881,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
         modal.innerHTML = `
             <div class="modal-content modal-content--wide">
                 <div class="modal-header">
-                    <h3>${uiIcon('inbox')} 邮箱详情</h3>
+                    <h2>${uiIcon('inbox')} 邮箱详情</h2>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                         ${uiIcon('close')}
                     </button>
@@ -1664,7 +2048,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId) {
     }
 };
 
-AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
+AdminMailboxManager.prototype.editMailbox = async function(mailboxId, opener = document.activeElement) {
     try {
         const response = await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}`);
         const mailbox = response.data;
@@ -1676,7 +2060,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
         modal.innerHTML = `
             <div class="modal-content modal-content--medium">
                 <div class="modal-header">
-                    <h3>编辑邮箱</h3>
+                    <h2>编辑邮箱</h2>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                         ${uiIcon('close')}
                     </button>
@@ -1685,7 +2069,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
                     <form id="edit-mailbox-form">
                         <div class="form-group">
                             <label>邮箱地址</label>
-                            <input type="text" data-role="mailbox-address" disabled>
+                            <input type="text" data-role="mailbox-address" aria-label="邮箱地址" disabled>
                         </div>
                         <div class="form-group">
                             <label for="edit-retention-days">保留天数</label>
@@ -1735,7 +2119,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId) {
         modal.querySelector('[data-action="save"]').addEventListener('click', () => {
             this.saveMailboxEdit(mailboxId, modal);
         });
-        openAdminModal(modal);
+        openAdminModal(modal, opener);
     } catch (error) {
         this.showToast('error', '加载邮箱信息失败');
     }
@@ -1788,14 +2172,14 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
     }
 };
 
-AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
+AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId, opener = document.activeElement) {
     // 显示确认模态框
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML = `
         <div class="modal-content modal-content--compact">
             <div class="modal-header">
-                <h3>确认删除</h3>
+                <h2>确认删除</h2>
                 <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                     ${uiIcon('close')}
                 </button>
@@ -1830,7 +2214,7 @@ AdminMailboxManager.prototype.deleteMailbox = async function(mailboxId) {
     modal.querySelector('[data-action="confirm"]').addEventListener('click', () => {
         this.confirmDeleteMailbox(mailboxId, modal);
     });
-    openAdminModal(modal);
+    openAdminModal(modal, opener);
 };
 
 AdminMailboxManager.prototype.confirmDeleteMailbox = async function(mailboxId, modal) {
@@ -1885,7 +2269,7 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
             const button = event.target.closest('button[data-log-index]');
             if (!button || !tbody.contains(button)) return;
             const log = logs[Number(button.dataset.logIndex)];
-            if (log) this.showAuditDetail(log);
+            if (log) this.showAuditDetail(log, button);
         };
     } catch (error) {
         console.error('加载审计日志失败:', error);
@@ -1894,14 +2278,14 @@ AdminMailboxManager.prototype.loadAuditLogs = async function() {
     }
 };
 
-AdminMailboxManager.prototype.showAuditDetail = function(log) {
+AdminMailboxManager.prototype.showAuditDetail = function(log, opener = document.activeElement) {
     const modal = document.createElement('div');
     modal.className = 'modal';
 
     modal.innerHTML = `
         <div class="modal-content modal-content--medium">
                 <div class="modal-header">
-                    <h3>${uiIcon('info')} 审计日志详情</h3>
+                    <h2>${uiIcon('info')} 审计日志详情</h2>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                     ${uiIcon('close')}
                 </button>
@@ -1952,7 +2336,7 @@ AdminMailboxManager.prototype.showAuditDetail = function(log) {
     modal.querySelectorAll('[data-action="close"]').forEach(button => {
         button.addEventListener('click', () => closeAndRemoveAdminModal(modal));
     });
-    openAdminModal(modal);
+    openAdminModal(modal, opener);
 };
 
 // 全选/取消全选
@@ -1980,7 +2364,7 @@ function updateBatchDeleteButton() {
 }
 
 // 批量删除邮箱
-async function batchDeleteMailboxes() {
+async function batchDeleteMailboxes(opener = document.activeElement) {
     const checkboxes = document.querySelectorAll('.mailbox-checkbox:checked');
     const mailboxIds = Array.from(checkboxes).map(cb => cb.value);
 
@@ -1995,7 +2379,7 @@ async function batchDeleteMailboxes() {
     modal.innerHTML = `
         <div class="modal-content modal-content--compact">
             <div class="modal-header">
-                <h3>确认批量删除</h3>
+                <h2>确认批量删除</h2>
                 <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                     ${uiIcon('close')}
                 </button>
@@ -2053,7 +2437,7 @@ async function batchDeleteMailboxes() {
             adminManager.showToast('error', '批量删除失败: ' + error.message);
         }
     };
-    openAdminModal(modal);
+    openAdminModal(modal, opener);
 }
 
 // 重置邮箱token
@@ -2079,7 +2463,7 @@ async function resetMailboxToken(mailboxId, opener = document.activeElement) {
         modal.innerHTML = `
             <div class="modal-content modal-content--compact">
                 <div class="modal-header">
-                    <h3>${uiIcon('key')} 新的访问令牌</h3>
+                    <h2>${uiIcon('key')} 新的访问令牌</h2>
                     <button class="modal-close" type="button" data-action="close" title="关闭对话框" aria-label="关闭对话框">
                         ${uiIcon('close')}
                     </button>
@@ -2180,7 +2564,7 @@ async function loadBlockedIPs() {
             const button = event.target.closest('button[data-ip-index]');
             if (!button || !tbody.contains(button)) return;
             const item = blockedIPs[Number(button.dataset.ipIndex)];
-            if (item) unblockIP(item.ip);
+            if (item) unblockIP(item.ip, button);
         };
     } catch (error) {
         tbody.innerHTML = '<tr><td colspan="3" class="error-row">加载失败</td></tr>';
@@ -2189,11 +2573,12 @@ async function loadBlockedIPs() {
 }
 
 // 解除IP封禁
-async function unblockIP(ip) {
+async function unblockIP(ip, opener = document.activeElement) {
     if (!await confirmAdminAction({
         title: '解除 IP 封禁',
         message: `确定要解除 ${ip} 的封禁吗？`,
         confirmLabel: '解除封禁',
+        opener,
     })) {
         return;
     }
@@ -2223,23 +2608,19 @@ async function loadSourceStats() {
         const sourceConfig = {
             'admin': {
                 label: '管理员创建',
-                icon: 'user-shield',
-                gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                icon: 'user-shield'
             },
             'register': {
                 label: '自助创建',
-                icon: 'user-plus',
-                gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
+                icon: 'user-plus'
             },
             'api_v2': {
                 label: 'API创建',
-                icon: 'code',
-                gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
+                icon: 'code'
             },
             'unknown': {
                 label: '未知来源',
-                icon: 'question',
-                gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+                icon: 'question'
             }
         };
 
@@ -2253,7 +2634,8 @@ async function loadSourceStats() {
             total += safeCount;
             html += `
                 <div class="stat-card">
-                    <div class="stat-icon" style="background: ${config.gradient};">
+                    <!-- 统计来源不代表风险等级，统一品牌色避免伪造语义。 -->
+                    <div class="stat-icon">
                         ${uiIcon(config.icon)}
                     </div>
                     <div class="stat-info">
@@ -2267,7 +2649,7 @@ async function loadSourceStats() {
         // 添加总计卡片
         html += `
             <div class="stat-card">
-                <div class="stat-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                <div class="stat-icon">
                     ${uiIcon('inbox')}
                 </div>
                 <div class="stat-info">
@@ -2434,15 +2816,16 @@ function displaySubAdmins(subAdmins) {
         const admin = rows[Number(button.dataset.adminIndex)];
         if (!admin) return;
         if (button.dataset.action === 'edit') {
-            editSubAdmin(admin.id);
+            editSubAdmin(admin.id, button);
         } else if (button.dataset.action === 'delete') {
-            deleteSubAdmin(admin.id, admin.token);
+            deleteSubAdmin(admin.id, admin.token, button);
         }
     };
 }
 
 // 显示创建子管理员模态框
-async function showCreateSubAdminModal() {
+// 在异步读取域名前保留触发按钮，保证 Safari 与键盘关闭后都有明确落点。
+async function showCreateSubAdminModal(opener = document.activeElement) {
     document.getElementById('sub-admin-modal-title').textContent = '添加子管理员';
     document.getElementById('sub-admin-id').value = '';
     document.getElementById('sub-admin-token').value = '';
@@ -2455,11 +2838,11 @@ async function showCreateSubAdminModal() {
     // 加载可用域名
     await loadDomainsForSubAdmin();
 
-    window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'));
+    window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'), opener);
 }
 
 // 编辑子管理员
-async function editSubAdmin(subAdminId) {
+async function editSubAdmin(subAdminId, opener = document.activeElement) {
     try {
         const response = await adminManager.apiRequest('/api/admin/sub-admins');
 
@@ -2487,7 +2870,7 @@ async function editSubAdmin(subAdminId) {
             // 加载可用域名并选中已分配的域名
             await loadDomainsForSubAdmin(admin.domains);
 
-            window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'));
+            window.MaildropUI.openDialog(document.getElementById('sub-admin-modal'), opener);
         }
     } catch (error) {
         console.error('加载子管理员信息失败:', error);
@@ -2616,12 +2999,13 @@ async function saveSubAdmin(event) {
 }
 
 // 删除子管理员
-async function deleteSubAdmin(subAdminId, token) {
+async function deleteSubAdmin(subAdminId, token, opener = document.activeElement) {
     if (!await confirmAdminAction({
         title: '删除子管理员',
         message: `确定要删除子管理员 "${token}" 吗？`,
         confirmLabel: '确认删除',
         danger: true,
+        opener,
     })) {
         return;
     }
