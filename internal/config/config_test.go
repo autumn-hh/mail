@@ -17,7 +17,8 @@ func envMap(values map[string]string) func(string) (string, bool) {
 func TestDefaults(t *testing.T) {
 	got := FromLookupEnv(envMap(nil))
 	want := &Config{
-		FlaskHost: "0.0.0.0", FlaskPort: 5000, SMTPHost: "0.0.0.0", SMTPPort: 25,
+		MCPAllowedHosts: "localhost,127.0.0.1,::1",
+		FlaskHost:       "0.0.0.0", FlaskPort: 5000, SMTPHost: "0.0.0.0", SMTPPort: 25,
 		InboxFileName: "inbox.json", MaxInboxSize: 100000000, DatabasePath: "data/mailbox.db", UseDatabase: true,
 		ProtectedAddresses: "^admin.*", DomainsStr: "localhost", Domains: []string{"localhost"}, Domain: "localhost",
 		EmailRetentionDays: 7, EmailRetentionTime: 604800, MaxEmailsPerAddress: 50,

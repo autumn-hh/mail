@@ -18,6 +18,7 @@ import (
 
 	"maildrop/internal/config"
 	"maildrop/internal/ipguard"
+	"maildrop/internal/mcpapi"
 	"maildrop/internal/store"
 )
 
@@ -71,6 +72,7 @@ func New(deps Deps) *Server {
 	s.registerPages()
 	s.registerPublicAPI()
 	s.registerAdminAPI()
+	s.mux.Handle("/mcp", mcpapi.New(s.cfg, s.store, s.blocker))
 
 	s.handler = s.pageHeaders(s.recoverPanics(s.mux))
 	return s
