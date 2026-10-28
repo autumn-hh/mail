@@ -1,19 +1,33 @@
+# 防止密钥、持久化数据和本地工具文件进入镜像层或构建上下文。
+# Go 构建需要 go.mod、go.sum 以及 src/frontend/（go:embed），这些路径不能排除。
+# Python 源码（app.py、config.py、requirements*.txt、src/backend/）将另行删除，此处不排除。
+.env
+.env.*
 .git
 .gitignore
 .sanshu-memory
-.env
-.env.*
-.project-context
-.vscode
-.venv
-data
-output
-__pycache__
-*.py[cod]
-.pytest_cache
-tests
-docs
+data/
 *.db
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tests/
+docs/
+scripts/
+reports/
+pictures/
+.ui-qa/
+.kilocode/
+**/*_test.go
+internal/store/testdata/
+*.md
+LICENCE
+.project-context/
+.vscode/
+.venv/
+output/
+.playwright-cli/
 *.db-shm
 *.db-wal
 *.exe

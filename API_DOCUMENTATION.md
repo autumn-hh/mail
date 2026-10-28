@@ -1,14 +1,5 @@
 # Maildrop 页面与 API 文档
 
-当前后端使用 Go，保留以下页面与接口路径。首页包含“管理员登录”入口。新增管理员域名设置接口：
-
-| 方法 | 路径 | 请求 / 响应 |
-| --- | --- | --- |
-| GET | `/api/admin/domains` | `{"success":true,"data":{"domains":["example.com"]}}` |
-| PUT | `/api/admin/domains` | 请求 `{"domains":["example.com"]}`；成功响应同 GET |
-
-两者要求 `Authorization: Bearer <PASSWORD>`。保存后持久化、立即影响新建邮箱和 SMTP 收信；移除域名保留已有邮件及凭据。更多说明见 [Go 迁移文档](docs/go-migration.md)。
-
 本文档描述当前公开页面、邮箱凭据流和主要 API。所有示例默认服务地址为
 `http://127.0.0.1:5000`。
 
@@ -199,6 +190,42 @@ curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
 | `POST` | `/api/admin/sub-admins` | 创建子管理员 |
 | `PUT` | `/api/admin/sub-admins/<sub_admin_id>` | 更新子管理员 |
 | `DELETE` | `/api/admin/sub-admins/<sub_admin_id>` | 删除子管理员 |
+
+### 域名设置
+
+收信域名保存在数据库中，由管理后台「域名设置」维护，修改后立即生效。`.env` 的 `DOMAINS`
+只在域名表为空（首次启动）时导入。`/api/get_random_address`、`/api/get_domain` 与注册接口
+都只使用已启用的域名；没有任何启用域名时返回 `503`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/domains` | 查询全部域名 |
+| `POST` | `/api/admin/domains` | 添加域名，请求体 `{"domain": "example.com"}`，成功返回 `201` |
+| `PUT` | `/api/admin/domains/<domain>` | 启用或禁用，请求体 `{"enabled": true}` |
+| `DELETE` | `/api/admin/domains/<domain>` | 删除域名 |
+| `POST` | `/api/admin/domains/batch-add` | 批量添加，请求体 `{"domains": ["a.com", "b.com"]}` |
+| `POST` | `/api/admin/domains/batch-delete` | 批量删除，请求体同上 |
+
+批量接口每次最多 200 个域名，空白条目会被忽略。
+
+- **批量添加**：部分成功。有效的新域名在同一事务中按输入顺序加入，其余写入 `skipped` 并说明原因（`域名格式不正确`、`重复输入`、`域名已存在`）。
+  返回 `{"success": true, "data": {"added": [域名对象...], "skipped": [{"domain": "...", "reason": "..."}]}}`。
+- **批量删除**：存在的域名在同一事务中删除，不存在的写入 `failed`。如果整批删除后不剩任何启用的域名，整批拒绝并返回 `409`，一个都不删。
+  返回 `{"success": true, "data": {"deleted": ["a.com"], "failed": [{"domain": "...", "reason": "域名不存在"}]}}`。
+- 请求体不是字符串列表或条目全为空返回 `400 domains必须是非空字符串列表`，超过 200 个返回 `400 单次最多处理 200 个域名`。
+
+域名对象格式：`{"domain": "example.com", "enabled": true, "created_at": 1800000000, "updated_at": 1800000000}`。
+域名会先规范化：去掉首尾空白，转成小写，去掉末尾的点，国际化域名转为 Punycode。
+
+| 状态码 | `error` | 场景 |
+| --- | --- | --- |
+| `400` | `域名格式不正确` | 域名缺失或格式非法 |
+| `400` | `enabled必须是布尔值` | `PUT` 的 `enabled` 缺失或不是布尔值 |
+| `404` | `域名不存在` | 路径中的域名不存在 |
+| `409` | `域名已存在` | 重复添加 |
+| `409` | `至少需要保留一个启用的域名` | 删除或禁用最后一个启用的域名 |
+
+子管理员注册只能使用自己授权的域名，其中在「域名设置」里被禁用的域名会被排除；不在域名表中的授权域名仍可使用。
 
 ## 已移除或不兼容
 

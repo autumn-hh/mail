@@ -1,0 +1,7 @@
+# 工作区统一使用 LF：gofmt 要求 LF，部署脚本需在 Linux 上直接执行。
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary

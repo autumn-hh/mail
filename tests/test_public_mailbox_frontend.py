@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,48 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
         self.assertNotIn('localStorage', script)
         self.assertNotIn('/mailbox?', script)
         self.assertNotIn('?token=', script)
+
+    def test_homepage_admin_entry_opens_accessible_login_modal(self):
+        html = read('src/frontend/templates/mailbox_login.html')
+        script = read('src/frontend/static/scripts/mailbox_login.js')
+
+        # 顶栏入口与无障碍弹窗契约：命名标题、焦点管理交给共享组件。
+        self.assertIn('id="admin-entry"', html)
+        self.assertIn('<span>管理员</span>', html)
+        self.assertIn('aria-haspopup="dialog"', html)
+        self.assertIn('id="admin-login-dialog"', html)
+        self.assertIn('aria-modal="true"', html)
+        self.assertIn('aria-labelledby="admin-login-title"', html)
+        self.assertIn('id="admin-login-title"', html)
+        self.assertIn('data-dialog-close', html)
+        self.assertIn('id="admin-login-password"', html)
+        self.assertIn('id="admin-login-error" role="alert"', html)
+        self.assertIn('MaildropUI.openDialog(dialog, opener)', script)
+
+        # 登录页不新增任何内联脚本、内联事件或行内样式，兼容严格 CSP。
+        self.assertIsNone(re.search(r'<script(?![^>]*\bsrc=)[^>]*>', html))
+        self.assertIsNone(re.search(r'\son[a-z]+\s*=', html))
+        self.assertIsNone(re.search(r'\bstyle\s*=', html))
+
+    def test_admin_login_modal_posts_credentials_and_maps_errors(self):
+        script = read('src/frontend/static/scripts/mailbox_login.js')
+        self.assertIn("fetch('/api/admin_login'", script)
+        self.assertIn('body: JSON.stringify({ password })', script)
+        self.assertIn("sessionStorage.setItem('admin_token', password)", script)
+        self.assertIn("window.location.assign('/admin')", script)
+        self.assertIn("MaildropUI.setBusy(submitButton, true, '验证中…')", script)
+        for message in ('密码错误', '当前 IP 不允许管理员登录', '管理员密码未配置', '网络异常，请稍后重试。'):
+            with self.subTest(message=message):
+                self.assertIn(message, script)
+        self.assertNotIn('localStorage', script)
+
+    def test_admin_page_validates_stored_session_token(self):
+        script = read('src/frontend/static/scripts/admin_mailbox.js')
+        # 打开 /admin 时用已存凭据请求统计接口，校验失败清除凭据并回到登录视图。
+        self.assertIn("this.authToken = sessionStorage.getItem('admin_token')", script)
+        self.assertIn('validateStoredToken()', script)
+        self.assertIn("sessionStorage.removeItem('admin_token')", script)
+        self.assertIn('this.showLoginView();', script)
 
     def test_mailbox_uses_bearer_and_reauthenticates_on_load(self):
         script = read('src/frontend/static/scripts/mailbox_manager.js')
@@ -54,14 +97,14 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, sources)
 
-    def test_neumorphic_tokens_and_responsive_rules_exist(self):
+    def test_editorial_tokens_and_responsive_rules_exist(self):
         # 核心令牌集中到共享基础，避免页面继续复制同一组主题变量。
         foundation = read('src/frontend/static/styles/ui_foundation.css').lower()
         for token in (
-            '--bg-start: #eef3f1',
-            '--bg-end: #e5edea',
-            '--surface: #edf2f0',
-            '--primary: #2f746d',
+            '--bg-start: #f7f7f2',
+            '--bg-end: #f7f7f2',
+            '--surface: #ffffff',
+            '--primary: #236552',
             '--shadow-raised:',
             '--shadow-inset:',
             '--ease: 180ms',
