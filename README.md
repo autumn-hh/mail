@@ -8,6 +8,7 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 **Now with V2 Features:**
 *   **Single Go Binary:** Web UI, REST API and SMTP server in one self-contained executable.
 *   **Super-admin MCP:** 35 tools at `/mcp` with independent Bearer authentication. See [MCP 接入与工具](docs/mcp.md) and [部署与运维](docs/mcp-deployment.md).
+    Detailed reference: [35 个工具的参数、返回值与调用示例](docs/mcp-tools.md).
 *   **Database Storage:** Robust SQLite support for better performance and data integrity.
 *   **Credential Access:** Mailbox key exchange followed by Bearer-token API access, with a separate admin password.
 *   **Enhanced API:** Comprehensive RESTful API V2 for integration and management.
