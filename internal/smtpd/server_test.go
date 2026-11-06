@@ -30,6 +30,7 @@ func newSMTPFixture(t *testing.T, adjust func(*config.Config)) smtpFixture {
 	t.Helper()
 	cfg := config.FromEnv(func(string) string { return "" })
 	cfg.MaxEmailSizeBytes = 512
+	cfg.VerifyInbound = false
 	if adjust != nil {
 		adjust(cfg)
 	}
@@ -124,10 +125,10 @@ func TestSMTPRealTCPDelivery(t *testing.T) {
 	}{
 		{"accepted bcc", []string{"in@test.example"}, false, "From: sender@origin.example\r\nSubject: bcc\r\n\r\nhello", 0, "", 1},
 		{"forwarded", []string{"in@test.example"}, false, "From: sender@origin.example\r\nTo: external@other.example\r\n\r\nforwarded", 0, "", 1},
-		{"mixed", []string{"unknown@test.example", "in@test.example"}, false, "From: sender@origin.example\r\n\r\nhello", 0, "", 1},
-		{"unknown recipient", []string{"unknown@test.example"}, false, "From: sender@origin.example\r\n\r\nhello", 550, "Mailbox unknown@test.example does not exist", 0},
+		{"mixed", []string{"unknown@test.example", "in@test.example"}, false, "From: sender@origin.example\r\n\r\nhello", 550, "Mailbox does not exist", 0},
+		{"unknown recipient", []string{"unknown@test.example"}, false, "From: sender@origin.example\r\n\r\nhello", 550, "Mailbox does not exist", 0},
 		{"IP whitelist", []string{"in@test.example"}, true, "From: sender@origin.example\r\n\r\nhello", 550, "Access denied - IP not whitelisted", 0},
-		{"parsed oversize", []string{"in@test.example"}, false, "From: sender@origin.example\r\n\r\n" + strings.Repeat("a", 600), 550, "Failed to save email: 邮件大小", 0},
+		{"parsed oversize", []string{"in@test.example"}, false, "From: sender@origin.example\r\n\r\n" + strings.Repeat("a", 600), 552, "Maximum message size exceeded", 0},
 		{"raw oversize", []string{"in@test.example"}, false, "Content-Type: application/octet-stream\r\n\r\n" + strings.Repeat(strings.Repeat("a", 998)+"\r\n", 1060), 552, "Maximum message size exceeded", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

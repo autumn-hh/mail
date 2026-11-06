@@ -36,6 +36,10 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 - [x] **Admin Panel** for managing mailboxes, domains and system settings (admin login also available from the homepage)
 - [x] **Configurable Retention** (from minutes to permanent)
 
+Authorized mailboxes can also compose, reply, attach files and track delivery through the web UI or API. Sending is disabled by default and can only be granted by the main administrator. Incoming mail supports attachments, inline images, original `.eml` downloads and SPF/DKIM/DMARC results. New inboxes default to 100 MiB, with a 20 MiB incoming message limit.
+
+See [mail operations](docs/mail-operations.md) for sending quotas, TLS certificates, per-domain DKIM keys, DNS requirements and the new API routes.
+
 ### Planned Features
 
 - [x] Better mobile UI
@@ -44,7 +48,7 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 
 ## Running the application
 
-Maildrop is a single Go binary that runs the web UI/API, the SMTP server and the cleanup job.
+Maildrop is a single Go binary that runs the web UI/API, the SMTP server, the persistent outbound queue and the cleanup job.
 The frontend is embedded into the binary, and data is stored in SQLite (`data/mailbox.db`).
 
 ### Prerequisites
