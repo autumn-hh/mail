@@ -92,6 +92,11 @@ func pageKeyValid(key string) bool {
 // pageHeaders 包住路由器，覆盖 404、405 和路径重定向。
 func (s *Server) pageHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		}
 		if r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 		}

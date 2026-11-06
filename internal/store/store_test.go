@@ -82,7 +82,7 @@ func TestMailboxLifecycleAndJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 		value := jsonObject(t, got)
-		if len(value) != 14 || value["created_by_ip"] != nil || value["whitelist_enabled"] != true || value["storage_limit"] != float64(3145728) {
+		if len(value) != 14 || value["created_by_ip"] != nil || value["whitelist_enabled"] != true || value["storage_limit"] != float64(104857600) {
 			t.Fatalf("lookup JSON: %v", value)
 		}
 		if got.ID != m.ID || len(got.SenderWhitelist) != 2 || got.CreatedSource != "admin" {
@@ -389,7 +389,8 @@ func fileHash(t *testing.T, path string) [32]byte {
 }
 
 // goOnlyColumns 列出 Go 版在 Python 结构之外追加的字段（表名.字段名）。
-var goOnlyColumns = map[string]bool{"mailboxes.admin_disabled": true}
+var goOnlyColumns = map[string]bool{"mailboxes.admin_disabled": true, "emails.content_id": true}
+var goOnlyTables = map[string]bool{"domains": true, "schema_migrations": true, "mail_content": true, "sending_policies": true, "outbound_messages": true, "outbound_recipients": true, "outbound_requests": true, "outbound_bounces": true}
 
 // 新库与旧库迁移后都必须带上 Go 版扩展字段，且位于表末尾、默认值为 0。
 func TestGoOnlyColumns(t *testing.T) {
@@ -466,6 +467,9 @@ func schemaSnapshot(t *testing.T, db *sql.DB) map[string]any {
 		return out
 	}
 	for _, o := range objects {
+		if goOnlyTables[o.table] {
+			continue
+		}
 		if o.kind == "table" {
 			columns := readRows("PRAGMA table_info(" + o.name + ")")
 			// Go 版扩展字段追加在末尾，不参与与 Python 基准的对比（单独由 TestGoOnlyColumns 覆盖）。
@@ -475,7 +479,16 @@ func schemaSnapshot(t *testing.T, db *sql.DB) map[string]any {
 					kept = append(kept, column)
 				}
 			}
-			snapshot[o.name] = []any{kept, readRows("PRAGMA foreign_key_list(" + o.name + ")"), readRows("PRAGMA index_list(" + o.name + ")")}
+			foreignKeys := readRows("PRAGMA foreign_key_list(" + o.name + ")")
+			legacyKeys := [][]any{}
+			for _, key := range foreignKeys {
+				name, _ := key[3].(string)
+				if !goOnlyColumns[o.name+"."+name] {
+					key[0] = int64(len(legacyKeys))
+					legacyKeys = append(legacyKeys, key)
+				}
+			}
+			snapshot[o.name] = []any{kept, legacyKeys, readRows("PRAGMA index_list(" + o.name + ")")}
 		}
 		if o.kind == "index" {
 			snapshot[o.name] = readRows("PRAGMA index_info(" + o.name + ")")
@@ -500,7 +513,7 @@ func normalizeSnapshot(t *testing.T, snapshot map[string]any) any {
 
 // TestMigrationsAgainstPython 对比 Go 迁移结果与 Python 版 init_tables 生成的表结构。
 // 基准 testdata/python_schema_<mode>.json 在移除 Python 实现前由其迁移真实生成，
-// 是旧版部署升级兼容性的唯一依据，不要手工修改；表结构有意变更时需同步更新并在提交中说明。
+// 用于校验旧字段兼容性，不得手工修改；Go 扩展单独验证。
 // existing-copy 依赖本机数据文件，只校验迁移可用、完整性与幂等。
 func TestMigrationsAgainstPython(t *testing.T) {
 	for _, mode := range []string{"fresh", "old-password", "old-no-password", "existing-copy"} {
@@ -722,10 +735,11 @@ func TestMigrationQuotaAndKeyBackfill(t *testing.T) {
 		id, key string
 		limit   any
 	}{
-		{"fifty", " ", 52428800}, {"null", "", nil}, {"custom", "legacy-uuid-token", 9 * 1048576},
+		{"fifty", " ", 52428800}, {"null", "", nil}, {"default", "", 3145728}, {"custom", "legacy-uuid-token", 9 * 1048576},
 	} {
 		execSQL(t, s.DB(), "INSERT INTO mailboxes (id,address,created_at,expires_at,mailbox_key,storage_limit) VALUES (?,?,1,2,?,?)", tc.id, tc.id+"@test.com", tc.key, tc.limit)
 	}
+	execSQL(t, s.DB(), "DELETE FROM schema_migrations WHERE name='mail-features-v1'")
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -733,8 +747,9 @@ func TestMigrationQuotaAndKeyBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.Close()
 	keys := map[string]string{}
-	for _, id := range []string{"fifty", "null", "custom"} {
+	for _, id := range []string{"fifty", "null", "default", "custom"} {
 		m, err := s.GetMailboxByID(id)
 		if err != nil {
 			t.Fatal(err)
@@ -746,7 +761,11 @@ func TestMigrationQuotaAndKeyBackfill(t *testing.T) {
 			}
 		} else {
 			validateKey(t, m.MailboxKey)
-			if m.StorageLimit != 3145728 {
+			expected := int64(104857600)
+			if id == "fifty" {
+				expected = 52428800
+			}
+			if m.StorageLimit != expected {
 				t.Fatal("quota migration", m.StorageLimit)
 			}
 		}

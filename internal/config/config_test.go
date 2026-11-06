@@ -23,7 +23,8 @@ func TestDefaults(t *testing.T) {
 		ProtectedAddresses: "^admin.*", DomainsStr: "localhost", Domains: []string{"localhost"}, Domain: "localhost",
 		EmailRetentionDays: 7, EmailRetentionTime: 604800, MaxEmailsPerAddress: 50,
 		IPWhitelist: "127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8", MailboxRetentionDays: 30, MaxRetentionDays: 36500,
-		MaxMailboxSizeMB: 3, MaxMailboxSizeBytes: 3145728, MaxEmailSizeMB: 2, MaxEmailSizeBytes: 2097152,
+		MaxMailboxSizeMB: 100, MaxMailboxSizeBytes: 104857600, MaxEmailSizeMB: 20, MaxEmailSizeBytes: 20971520,
+		VerifyInbound: true, DKIMKeyDir: "data/dkim", DKIMSelector: "maildrop", OutboundIPv4Only: true,
 		IPBlockDuration: 300, IPMaxFailedAttempts: 3, IPAttemptWindow: 60,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -40,8 +41,8 @@ func TestClamping(t *testing.T) {
 		{"TRUST_PROXY_HOPS", "TrustProxyHops", 0, 0, 10}, {"MAX_INBOX_SIZE", "MaxInboxSize", 100000000, 1000, 0},
 		{"EMAIL_RETENTION_SECONDS", "EmailRetentionSeconds", 0, 0, 0}, {"EMAIL_RETENTION_DAYS", "EmailRetentionDays", 7, 1, 365},
 		{"MAX_EMAILS_PER_ADDRESS", "MaxEmailsPerAddress", 50, 1, 1000}, {"MAILBOX_RETENTION_DAYS", "MailboxRetentionDays", 30, 1, 0},
-		{"MAX_RETENTION_DAYS", "MaxRetentionDays", 36500, 1, 0}, {"MAX_MAILBOX_SIZE_MB", "MaxMailboxSizeMB", 3, 1, 100},
-		{"MAX_EMAIL_SIZE_MB", "MaxEmailSizeMB", 2, 1, 50}, {"IP_BLOCK_DURATION", "IPBlockDuration", 300, 60, 86400},
+		{"MAX_RETENTION_DAYS", "MaxRetentionDays", 36500, 1, 0}, {"MAX_MAILBOX_SIZE_MB", "MaxMailboxSizeMB", 100, 1, 10000},
+		{"MAX_EMAIL_SIZE_MB", "MaxEmailSizeMB", 20, 1, 20}, {"IP_BLOCK_DURATION", "IPBlockDuration", 300, 60, 86400},
 		{"IP_MAX_FAILED_ATTEMPTS", "IPMaxFailedAttempts", 3, 1, 100}, {"IP_ATTEMPT_WINDOW", "IPAttemptWindow", 60, 10, 3600},
 	}
 	var warnings bytes.Buffer
@@ -162,5 +163,12 @@ func TestPythonIntegerSyntax(t *testing.T) {
 		if got := FromLookupEnv(envMap(map[string]string{"FLASK_PORT": tc.raw})).FlaskPort; got != tc.want {
 			t.Errorf("%q: %d != %d", tc.raw, got, tc.want)
 		}
+	}
+}
+
+func TestMailFeatureEnvironment(t *testing.T) {
+	cfg := FromLookupEnv(envMap(map[string]string{"MAX_MAILBOX_SIZE_MB": "3", "MAX_EMAIL_SIZE_MB": "100", "SMTP_HOSTNAME": "mail.example.com", "SMTP_TLS_CERT_FILE": "cert.pem", "SMTP_TLS_KEY_FILE": "key.pem", "OUTBOUND_ENABLED": "true", "VERIFY_INBOUND": "false", "DKIM_KEY_DIR": "keys", "DKIM_SELECTOR": "s1", "OUTBOUND_IPV4_ONLY": "false"}))
+	if cfg.MaxMailboxSizeBytes != 100<<20 || cfg.MaxEmailSizeBytes != 20<<20 || cfg.SMTPHostname != "mail.example.com" || !cfg.OutboundEnabled || cfg.VerifyInbound || cfg.OutboundIPv4Only || cfg.DKIMKeyDir != "keys" || cfg.DKIMSelector != "s1" || cfg.SMTPTLSCertFile != "cert.pem" || cfg.SMTPTLSKeyFile != "key.pem" {
+		t.Fatalf("mail config %+v", cfg)
 	}
 }

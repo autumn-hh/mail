@@ -22,6 +22,7 @@ import (
 func TestSMTPDeliverySenderRulesAndRecipientDomainCase(t *testing.T) {
 	cfg := config.FromEnv(func(string) string { return "" })
 	cfg.EnableIPWhitelist = false
+	cfg.VerifyInbound = false
 	db, err := store.OpenWithConfig(filepath.Join(t.TempDir(), "smtp.db"), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +102,14 @@ func TestSMTPDeliverySenderRulesAndRecipientDomainCase(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := client.Rcpt(tc.recipient); err != nil {
-				t.Fatal(err)
+				if tc.name != "local part stays exact" {
+					t.Fatal(err)
+				}
+				var reply *textproto.Error
+				if !errors.As(err, &reply) || reply.Code != 550 {
+					t.Fatal(err)
+				}
+				return
 			}
 			writer, err := client.Data()
 			if err != nil {

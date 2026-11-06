@@ -1,8 +1,8 @@
 # Maildrop MCP 接入与工具
 
-MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层和 SQLite。当前仅支持超级管理员，可管理全部邮箱，不提供子管理员管理或邮箱身份认证。邮局只收信。
+MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层、持久投递队列和 SQLite。当前仅支持超级管理员，可管理全部邮箱，不提供子管理员管理或邮箱身份认证。1.1.0 新增发信工具；需部署本版、完成出站配置并为邮箱授权后才能使用。
 
-需要逐项接入时，请阅读 [35 个工具的详细参考](mcp-tools.md)：包含每项参数类型、必填与默认值、请求和返回示例、返回字段、失败条件、审计及操作流程。
+需要逐项接入时，请阅读 [41 个工具的详细参考](mcp-tools.md)：包含每项参数类型、必填与默认值、请求和返回示例、返回字段、失败条件、审计及操作流程。
 
 ## 入口与认证
 
@@ -28,7 +28,7 @@ MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层和 SQLite。当�
 
 客户端顺序为 initialize → notifications/initialized → tools/list / tools/call。HTTP 请求设置 Content-Type: application/json，Accept 包含 application/json, text/event-stream；后续请求携带协商后的 MCP-Protocol-Version。请使用支持 Streamable HTTP 的 MCP SDK。浏览器地址栏不能完成认证与协议握手。
 
-## 工具全集（35 项）
+## 工具全集（41 项）
 
 `mailbox` 可传邮箱 ID 或完整地址；可选参数以 ? 标出；最终 JSON Schema 以 tools/list 为准。以下均为完整工具名称。
 
@@ -70,6 +70,17 @@ MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层和 SQLite。当�
 | maildrop_get_security_config | 无 | 认证失败阈值，进程内有效 |
 | maildrop_update_security_config | block_duration?, max_attempts?, attempt_window? | 至少一项；秒数 60–86400 / 次数 1–10 / 窗口秒数 30–600 |
 
+新增出站工具：
+
+| 工具 | 主要参数 | 行为 |
+| --- | --- | --- |
+| maildrop_get_sending_policy | mailbox | 查询授权、额度、用量和服务可用性 |
+| maildrop_set_sending_policy | mailbox, enabled, daily_limit, minute_limit | 显式授权/撤权及设置额度；不会配置服务器或 DKIM |
+| maildrop_send_email | mailbox, idempotency_key, to, subject, text?, html?, cc?, bcc?, reply_email_id?, attachments? | 复用出站队列提交邮件；发件人固定为指定邮箱 |
+| maildrop_list_sent_emails | mailbox, offset? | 每页最多 50 条发送摘要，不返回正文或附件内容 |
+| maildrop_get_sent_email | mailbox, sent_id, max_body_chars? | 查询正文、各收件人投递状态和退信摘要 |
+| maildrop_delete_sent_email | mailbox, sent_id | 删除已结束记录，额度和幂等墓碑保留 |
+
 邮件筛选参数：query（主题/发件人/正文的字面子串）、sender、subject、after、before（Unix 秒，含边界）、unread_only、page、page_size、ignore_ids（最多 200）。邮件每页默认 20、最多 100；邮箱每页默认 20、最多 200。子串大小写折叠遵循 SQLite 规则。邮箱状态筛选为 active/expired/disabled。
 
 收件域名必须启用；address 必须是完整地址，用户名沿用后台 3–20 位英文字母/数字规则。allowed_domains 指允许的**发件域名**。retention_days 沿用后台语义：必须为 1 至 MAX_RETENTION_DAYS 的整数，省略时使用 MAILBOX_RETENTION_DAYS；本 MCP 创建和修改工具不接受 0 或 -1。修改保留期会重新计算期限。
@@ -96,8 +107,10 @@ after 请替换成实际等待开始时间。超时返回 found=false,timed_out=
 - 列表和普通详情隐藏邮箱 Key/Token；创建和轮换返回新值；详情需显式 include_credentials=true。超管 Token 不通过工具返回。
 - 邮箱批量创建/删除、域名添加支持部分成功，必须检查逐项结果。取消或出错后先查询状态，不能盲目重试整批。邮件批删遇缺失/外来 ID 整批回滚。
 - 部分沿用后台的变更与审计分步提交，审计错误时变更可能已完成，重试前先查询。审计操作人为 mcp-superadmin，IP 遵循 TRUST_PROXY_HOPS。
-- 请求最多 1 MiB、最多 32 并发、上下文最多 45 秒。Host/Origin 拒绝返回 403；认证失败 401；认证封禁/并发满 429。MCP 与后台共用 IP 封禁器。
+- 请求最多 16 MiB（含附件 base64 与 JSON 开销）、最多 32 并发、上下文最多 45 秒。Host/Origin 拒绝返回 403；认证失败 401；认证封禁/并发满 429。MCP 与后台共用 IP 封禁器。反向代理可能有更低请求体限制。
 - IP 封禁及安全阈值仅进程内生效，重启重置。持久化阈值须修改 IP_BLOCK_DURATION、IP_MAX_FAILED_ATTEMPTS、IP_ATTEMPT_WINDOW 环境变量并重启。
-- 不包含发信、DNS 注册商配置、服务器命令、数据库备份、子管理员管理。新增域名后仍需在 DNS 服务商配置 MX/A。
+- 发信须满足全局 OUTBOUND_ENABLED、SMTP_HOSTNAME、发件域 DKIM 密钥及邮箱授权。发送和查询权限不会隐式开启发件；同一邮件重试复用 idempotency_key 和原参数。入队不代表送达，accepted 仅代表对方 SMTP 接受。
+- 发信附件最多 10 个、解码后共 10 MiB，正文共 1 MiB，To/Cc/Bcc 共最多 100 项；按去重收件人数扣额度。发件记录和退信内容也是不可信数据。Bcc 仅在认证后的私有记录中可见，不写入对外邮件头。
+- 不包含附件/EML 下载、DNS 注册商配置、服务器命令、数据库备份、子管理员管理。附件/EML 下载使用邮箱身份 HTTP API。新增域名后仍需在 DNS 服务商配置 MX/A；出站配置见 [收发运行说明](mail-operations.md)。
 
 凭据轮换和回滚见 [部署与运维](mcp-deployment.md)。

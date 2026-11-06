@@ -35,7 +35,7 @@ func (a *api) systemTools() {
 		return map[string]any{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)}, err
 	})
 	add(a, "server_info", "Report MCP identity, capabilities and limits without configuration secrets.", true, false, true, func(context.Context, empty) (any, error) {
-		return map[string]any{"name": "maildrop", "mcp_version": "1.0.0", "role": "superadmin", "transport": "streamable-http", "endpoint": "/mcp", "receive_only": true, "tool_count": 35, "limits": map[string]any{"mailbox_batch": 100, "domain_batch": 200, "email_delete_batch": 200, "email_page_size": 100, "wait_seconds": 25}, "security_config_persistent": false}, nil
+		return map[string]any{"name": "maildrop", "mcp_version": version, "role": "superadmin", "transport": "streamable-http", "endpoint": "/mcp", "receive_only": false, "outbound_enabled": a.cfg.OutboundEnabled, "tool_count": toolCount, "limits": map[string]any{"mailbox_batch": 100, "domain_batch": 200, "email_delete_batch": 200, "email_page_size": 100, "wait_seconds": 25, "request_bytes": maxRequestBytes, "send_recipients": 100, "send_attachments": 10, "attachment_bytes": 10 << 20, "sent_page_size": 50}, "security_config_persistent": false}, nil
 	})
 	add(a, "list_domains", "List all receiving domains and enabled state.", true, false, true, func(context.Context, empty) (any, error) { return a.admin.ListDomains() })
 	add(a, "add_domains", "Add 1-200 domains. Partial success; reports added and skipped reasons; names normalized to Punycode.", false, false, false, func(ctx context.Context, in domainsInput) (any, error) {

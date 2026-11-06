@@ -86,16 +86,17 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
         # DOMParser 可能在清洗前加载 img/iframe；惰性 template 才是此处的安全解析容器。
         self.assertNotIn('new DOMParser', script)
 
-    def test_receive_only_ui_has_no_outbound_controls(self):
-        sources = '\n'.join((
-            read('src/frontend/templates/mailbox_manager.html'),
-            read('src/frontend/static/scripts/mailbox_manager.js'),
-            read('src/frontend/templates/api_test.html'),
-            read('src/frontend/static/scripts/api_test.js'),
-        ))
-        for forbidden in ('写邮件', '已发送', '回复', '转发', '二维码', 'send_test_email'):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, sources)
+    def test_mail_features_require_authorization_and_keep_downloads_private(self):
+        html = read('src/frontend/templates/mailbox_manager.html')
+        script = read('src/frontend/static/scripts/mail_features.js')
+        self.assertIn('id="compose-nav"', html)
+        self.assertIn('id="compose-fields" disabled', html)
+        self.assertIn('mailFeatures.policy?.enabled', script)
+        self.assertIn("'Idempotency-Key'", script)
+        self.assertIn('Authorization: `Bearer ${state.accessToken}`', script)
+        self.assertNotIn('?token=', script)
+        self.assertNotIn('localStorage', script)
+        self.assertNotIn('send_test_email', script)
 
     def test_editorial_tokens_and_responsive_rules_exist(self):
         # 核心令牌集中到共享基础，避免页面继续复制同一组主题变量。

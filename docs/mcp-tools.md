@@ -1,10 +1,10 @@
 # Maildrop MCP 工具详细参考
 
-版本依据：生产代码提交 `199c527`，于 2026-10-28 对 `https://mail.roixw.com/mcp` 执行 initialize 与 tools/list 获取 35 项输入 Schema，再对照 internal/mcpapi、internal/admin、internal/inbox、internal/store 实现编写。本文不包含真实认证值。所有地址、ID、邮件内容、统计数字和时间示例均为构造数据，调用前替换。示例写入操作仅供参考，本次文档核对没有在生产执行这些变更。
+版本依据：当前源码 MCP 1.1.0，共 41 个工具；原 35 个工具兼容保留，新增 6 个出站工具通过本地真实 HTTP SDK 与隔离 SQLite 验证。线上是否已升级须以 tools/list 为准，本文不表示已部署。本文不含真实认证值，所有地址、ID、内容与数字均为示例。
 
 ## 1. 快速定位
 
-完整工具名以 `maildrop_` 开头。每个工具在后文都有参数表、请求示例、响应示例、逐字段返回说明、规则、失败条件和副作用。
+完整工具名以 `maildrop_` 开头。原35项在本文逐项说明；新增36–41项见[出站工具详细参考](mcp-outbound.md)，包含参数、返回字段、失败条件、幂等和审计规则。
 
 - 邮箱：生成/创建、批量创建、分页/详情、更新、启停、停用/硬删除、API Token与网页Key轮换。
 - 发件限制：白名单查看/增删/开关；`allowed_domains` 在邮箱创建/更新中配置。
@@ -26,7 +26,7 @@ Authorization: Bearer <MCP_ADMIN_TOKEN>
 MCP-Protocol-Version: <initialize返回的协议版本>
 ```
 
-先 `initialize`，取其 `result.protocolVersion`；再发送 `notifications/initialized`，随后 `tools/list` 或 `tools/call`。不要把应用 `mcp_version=1.0.0` 当成协议头中的日期版本。
+先 `initialize`，取其 `result.protocolVersion`；再发送 `notifications/initialized`，随后 `tools/list` 或 `tools/call`。不要把应用 `mcp_version=1.1.0` 当成协议头中的日期版本。
 
 初始化示例：
 
@@ -161,7 +161,7 @@ create/update整组白名单的校验要求完整地址或@域名，而单条add
 
 | 项目 | 限额或规则 |
 | --- | --- |
-| HTTP请求体 | 最多1MiB；反代可能更早拒绝 |
+| HTTP请求体 | 最多16MiB；反代可能更早拒绝 |
 | 并发 | 最多32个已认证在途MCP请求 |
 | 请求上下文 | 最多45秒；底层个别非context调用不承诺强制实时中断 |
 | 邮箱批量创建/删除 | 1–100输入项 |
@@ -175,7 +175,7 @@ create/update整组白名单的校验要求完整地址或@域名，而单条add
 
 工具annotations中的幂等提示针对业务状态，不保证重复调用的审计、updated_at或计数响应相同。不能自动重试创建、轮换、永久删除、批量变更或重算期限。网络中断/取消不等于服务器回滚；先查询当前状态，再决定重试单项。
 
-## 4. 35个工具的逐项参考
+## 4. 41个工具的逐项参考
 
 - [01. maildrop_generate_address：生成候选邮箱地址](#maildrop_generate_address)
 - [02. maildrop_create_mailbox：创建单个邮箱](#maildrop_create_mailbox)
@@ -212,6 +212,7 @@ create/update整组白名单的校验要求完整地址或@域名，而单条add
 - [33. maildrop_unblock_ip：解封单个IP](#maildrop_unblock_ip)
 - [34. maildrop_get_security_config：查询认证失败封禁阈值](#maildrop_get_security_config)
 - [35. maildrop_update_security_config：修改运行期封禁阈值](#maildrop_update_security_config)
+- [36–41. 出站授权、发送及记录工具](mcp-outbound.md)
 
 <a id="maildrop_generate_address"></a>
 
@@ -1623,18 +1624,24 @@ include_credentials=true时额外字段access_token/mailbox_key均为敏感字�
 ```json
 {
   "name": "maildrop",
-  "mcp_version": "1.0.0",
+  "mcp_version": "1.1.0",
   "role": "superadmin",
   "transport": "streamable-http",
   "endpoint": "/mcp",
-  "receive_only": true,
-  "tool_count": 35,
+  "receive_only": false,
+  "outbound_enabled": false,
+  "tool_count": 41,
   "limits": {
     "mailbox_batch": 100,
     "domain_batch": 200,
     "email_delete_batch": 200,
     "email_page_size": 100,
-    "wait_seconds": 25
+    "wait_seconds": 25,
+    "request_bytes": 16777216,
+    "send_recipients": 100,
+    "send_attachments": 10,
+    "attachment_bytes": 10485760,
+    "sent_page_size": 50
   },
   "security_config_persistent": false
 }
@@ -1645,21 +1652,27 @@ include_credentials=true时额外字段access_token/mailbox_key均为敏感字�
 | 字段 | 示例类型 | 说明 |
 | --- | --- | --- |
 | name | string | MCP实现标识maildrop。 |
-| mcp_version | string | 应用暴露版本1.0.0，不是协议日期。 |
+| mcp_version | string | 应用暴露版本1.1.0，不是协议日期。 |
 | role | string | 固定superadmin。 |
 | transport | string | 固定streamable-http。 |
 | endpoint | string | MCP路径/mcp。 |
-| receive_only | boolean | true表示只收信。 |
-| tool_count | integer | 当前工具数35。 |
+| receive_only | boolean | false表示代码支持收发；是否实际启用看 outbound_enabled。 |
+| outbound_enabled | boolean | 全局发件开关；不代表邮箱已授权或DKIM/DNS已配置正确。 |
+| tool_count | integer | 当前工具数41。 |
 | limits | object | 工具批量/分页/等待限额。 |
 | limits.mailbox_batch | integer | 邮箱批量输入项上限。 |
 | limits.domain_batch | integer | 域名批量输入项上限。 |
 | limits.email_delete_batch | integer | 邮件批量删除输入项上限。 |
 | limits.email_page_size | integer | 邮件页大小上限。 |
 | limits.wait_seconds | integer | 单次等待秒数上限。 |
+| limits.request_bytes | integer | MCP JSON请求体上限，含base64开销。 |
+| limits.send_recipients | integer | To/Cc/Bcc合计输入数量上限。 |
+| limits.send_attachments | integer | 单封附件个数上限。 |
+| limits.attachment_bytes | integer | 解码后附件总字节上限。 |
+| limits.sent_page_size | integer | 发送记录固定页大小50。 |
 | security_config_persistent | boolean | false：运行期安全设置不持久化。 |
 
-**规则与边界**：mcp_version=1.0.0是应用暴露的版本标识，不是initialize协商的协议日期。协议版本以initialize.result.protocolVersion为准。该工具没有配置秘密。
+**规则与边界**：mcp_version=1.1.0是应用暴露的版本标识，不是initialize协商的协议日期。协议版本以initialize.result.protocolVersion为准。该工具没有配置秘密。
 
 **失败条件**：通常仅认证/协议层失败。
 
@@ -2275,7 +2288,7 @@ include_credentials=true时额外字段access_token/mailbox_key均为敏感字�
 
 ### 5.4 轮换凭据
 
-重置邮箱API Token用reset_mailbox_token，旧邮箱Token失效；重置网页Key用rotate_mailbox_key，旧Key失效但不撤销邮箱API Token。MCP超管Token轮换需要改服务器环境文件、更新客户端并重启，不通过这35个工具执行。若希望全部旧邮箱访问方式失效，需要分别处理网页Key和邮箱Token。
+重置邮箱API Token用reset_mailbox_token，旧邮箱Token失效；重置网页Key用rotate_mailbox_key，旧Key失效但不撤销邮箱API Token。MCP超管Token轮换需要改服务器环境文件、更新客户端并重启，不通过这41个工具执行。若希望全部旧邮箱访问方式失效，需要分别处理网页Key和邮箱Token。
 
 ### 5.5 从统计和审计排查问题
 
@@ -2299,14 +2312,15 @@ include_credentials=true时额外字段access_token/mailbox_key均为敏感字�
 
 ## 7. 本版已知边界与文档验证
 
-此版本支持35个工具和超管身份；不提供发信、附件/EML、邮件转发配置、DNS服务商操作、子管理员MCP、邮箱身份MCP、专门验证码解析或持久化安全阈值工具。搜索按单个邮箱；无跨邮箱正文全文搜索、无审计时间分页、无超过200000字符的正文分段接口。
+此版本支持41个工具和超管身份，含出站发送及记录管理；不提供附件/EML下载、邮件转发配置、DNS服务商操作、子管理员MCP、邮箱身份MCP、专门验证码解析或持久化安全阈值工具。搜索按单个邮箱；无跨邮箱正文全文搜索、无审计时间分页、无超过200000字符的正文分段接口。
 
-本次验证：线上initialize与tools/list共35项；全部工具请求示例与线上inputSchema逐项校验；业务范围、返回字段与当前实现回读核对；JSON示例语法和字段覆盖检查。未为写文档再次在生产执行删除、轮换或配置修改。部署阶段的端到端收信测试记录见交付文档。
+验证：本地 HTTP SDK 测试确认 41 工具、鉴权、发信入队、附件、幂等、额度、归属与撤权。此次未部署，未向真实外部收件人发送邮件；SMTP/DNS/IP信誉需上线环境另验。
 
 实现索引：
 
 - internal/mcpapi/server.go：认证、Host/Origin、传输、错误与脱敏。
 - internal/mcpapi/mailboxes.go：邮箱与发件白名单工具。
+- internal/mcpapi/outbound.go：发件授权、入队、发送记录及归属校验。
 - internal/mcpapi/emails.go：邮件列表/搜索/正文/等待/已读/批删。
 - internal/mcpapi/system.go：域名、统计、审计、封禁与配置。
 - internal/admin/mailboxes.go、domains.go、operations.go：复用业务规则、事务及审计。
