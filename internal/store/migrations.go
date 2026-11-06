@@ -145,10 +145,6 @@ func (s *Store) migrate() error {
 				return err
 			}
 		}
-		// 与 Python 启动迁移保持一致，保留历史 50 MiB -> 3 MiB 策略。
-		if _, err := tx.Exec(`UPDATE mailboxes SET storage_limit = 3145728 WHERE storage_limit = 52428800 OR storage_limit IS NULL`); err != nil {
-			return err
-		}
 		for _, index := range []struct{ name, table, column string }{
 			{"idx_mailboxes_address", "mailboxes", "address"}, {"idx_mailboxes_expires", "mailboxes", "expires_at"},
 			{"idx_mailboxes_access_token", "mailboxes", "access_token"}, {"idx_emails_mailbox", "emails", "mailbox_id"},
@@ -188,6 +184,9 @@ func (s *Store) migrate() error {
 				}
 			}
 		}
-		return s.migrateLocalSettings(tx)
+		if err := s.migrateLocalSettings(tx); err != nil {
+			return err
+		}
+		return migrateMailFeatures(tx)
 	})
 }

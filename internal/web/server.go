@@ -19,6 +19,7 @@ import (
 	"maildrop/internal/config"
 	"maildrop/internal/ipguard"
 	"maildrop/internal/mcpapi"
+	"maildrop/internal/outbound"
 	"maildrop/internal/store"
 )
 
@@ -26,6 +27,7 @@ import (
 type Deps struct {
 	Config    *config.Config
 	Store     *store.Store
+	Outbound  *outbound.Service
 	Blocker   *ipguard.Blocker
 	Whitelist *ipguard.Whitelist
 	// Frontend 的根目录需包含 templates/ 与 static/ 两个子目录。
@@ -38,6 +40,7 @@ type Deps struct {
 type Server struct {
 	cfg       *config.Config
 	store     *store.Store
+	outbound  *outbound.Service
 	blocker   *ipguard.Blocker
 	whitelist *ipguard.Whitelist
 	frontend  fs.FS
@@ -52,6 +55,7 @@ func New(deps Deps) *Server {
 	s := &Server{
 		cfg:       deps.Config,
 		store:     deps.Store,
+		outbound:  deps.Outbound,
 		blocker:   deps.Blocker,
 		whitelist: deps.Whitelist,
 		frontend:  deps.Frontend,
@@ -69,10 +73,13 @@ func New(deps Deps) *Server {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
+	if s.outbound == nil {
+		s.outbound = outbound.New(s.cfg, s.store, s.now)
+	}
 	s.registerPages()
 	s.registerPublicAPI()
 	s.registerAdminAPI()
-	s.mux.Handle("/mcp", mcpapi.New(s.cfg, s.store, s.blocker))
+	s.mux.Handle("/mcp", mcpapi.New(s.cfg, s.store, s.blocker, s.outbound))
 
 	s.handler = s.pageHeaders(s.recoverPanics(s.mux))
 	return s

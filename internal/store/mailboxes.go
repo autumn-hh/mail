@@ -81,11 +81,11 @@ func (s *Store) CreateMailbox(address string, options CreateMailboxOptions) (*Ma
 		RetentionDays: days, SenderWhitelist: whitelist, WhitelistEnabled: len(whitelist) > 0,
 		AccessToken: base64.RawURLEncoding.EncodeToString(token), MailboxKey: key, IsActive: true,
 		CreatedSource: source, CreatedByIP: options.CreatedByIP, LastAccessed: &now,
-		StorageLimit: 3145728, AllowedDomains: []string{}, created: true}
+		StorageLimit: s.cfg.MaxMailboxSizeBytes, AllowedDomains: []string{}, created: true}
 	_, err = s.db.Exec(`INSERT INTO mailboxes (id, address, created_at, expires_at, retention_days,
- sender_whitelist, whitelist_enabled, created_by_ip, access_token, mailbox_key, last_accessed, created_source)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.ID, address, now, m.ExpiresAt, days,
-		string(encoded), m.WhitelistEnabled, options.CreatedByIP, m.AccessToken, key, now, source)
+ sender_whitelist, whitelist_enabled, created_by_ip, access_token, mailbox_key, last_accessed, created_source, storage_limit)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.ID, address, now, m.ExpiresAt, days,
+		string(encoded), m.WhitelistEnabled, options.CreatedByIP, m.AccessToken, key, now, source, m.StorageLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -82,12 +82,12 @@ func (s *Service) CreateOrGetMailbox(ctx context.Context, address string, option
 			ExpiresAt: now + int64(days)*86400, RetentionDays: days, SenderWhitelist: whitelist,
 			WhitelistEnabled: len(whitelist) > 0, AccessToken: base64.RawURLEncoding.EncodeToString(token),
 			MailboxKey: key, IsActive: true, CreatedSource: source, CreatedByIP: options.CreatedByIP,
-			LastAccessed: &now, StorageLimit: 3145728, created: true}
+			LastAccessed: &now, StorageLimit: s.cfg.MaxMailboxSizeBytes, created: true}
 		_, err = tx.ExecContext(ctx, `INSERT INTO mailboxes (id, address, created_at, expires_at,
  retention_days, sender_whitelist, whitelist_enabled, created_by_ip, access_token, mailbox_key,
- last_accessed, created_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+ last_accessed, created_source, storage_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			result.ID, address, now, result.ExpiresAt, days, string(encoded), result.WhitelistEnabled,
-			options.CreatedByIP, result.AccessToken, key, now, source)
+			options.CreatedByIP, result.AccessToken, key, now, source, result.StorageLimit)
 		return err
 	})
 	if err != nil {
@@ -140,82 +140,138 @@ func senderDomainAllowed(m *Mailbox, sender string) bool {
 	return false
 }
 
-// Deliver 只按信封收件人投递；发件人白名单与 Python 版一致只校验头部 From。
-// 信封发件人常是 SES、邮件列表等第三方退信地址，叠加校验会误拒已加白的正常邮件，
-// 而两者在没有 SPF/DKIM 时同样可伪造，并不能带来实际安全收益。
-// 预期拒收不返回 error；内部错误回滚整批，结果不报告任何已提交投递。
+// RecipientStatus 在 RCPT 阶段检查可提前确定的条件；DATA 提交时再次校验。
+func (s *Service) RecipientStatus(ctx context.Context, address string) (int, string, error) {
+	var code int
+	var reason string
+	err := s.store.WithTx(ctx, func(tx *sql.Tx) error {
+		m, err := s.deliveryMailbox(ctx, tx, address)
+		if err != nil {
+			return err
+		}
+		switch {
+		case m == nil:
+			code, reason = 550, "Mailbox does not exist"
+		case s.now().Unix() > m.ExpiresAt:
+			code, reason = 550, "Mailbox has expired"
+		case !m.IsActive:
+			code, reason = 550, "Mailbox is disabled"
+		case m.StorageUsed >= m.StorageLimit:
+			code, reason = 452, "Mailbox storage is full"
+		}
+		return nil
+	})
+	return code, reason, err
+}
+
+// Deliver 在同一事务中先校验全部收件人，再统一写入；任何失败都不部分投递。
 func (s *Service) Deliver(ctx context.Context, envelopeFrom string, recipients []string, msg *mailparse.Message) (DeliveryResult, error) {
 	result := DeliveryResult{Recipients: []RecipientOutcome{}}
 	if msg == nil {
 		return result, errors.New("nil message")
 	}
-	email := store.Email{From: msg.From, To: msg.To, Subject: msg.Subject, Body: msg.Body,
-		ContentType: msg.ContentType, Timestamp: msg.Timestamp, Sent: msg.Sent}
+	email := store.Email{From: msg.From, To: msg.To, Subject: msg.Subject, Body: msg.Body, ContentType: msg.ContentType, Timestamp: msg.Timestamp, Sent: msg.Sent}
 	if email.ContentType == "" {
 		email.ContentType = "Text"
 	}
 	size := store.CalculateEmailSize(email)
-	ids := make([]string, len(recipients))
-	for i := range ids {
-		if i == 0 && msg.ID != "" {
-			ids[i] = msg.ID
-			continue
-		}
-		id, err := uuid.NewRandom()
-		if err != nil {
-			return result, err
-		}
-		ids[i] = id.String()
+	if msg.Raw != nil {
+		size = int64(len(msg.Raw))
 	}
 	err := s.store.WithTx(ctx, func(tx *sql.Tx) error {
 		now := s.now().Unix()
-		seen := make(map[string]RecipientOutcome)
-		for i, recipient := range recipients {
-			outcome, duplicate := seen[recipient]
-			if !duplicate {
-				outcome = RecipientOutcome{Recipient: recipient}
-				m, err := s.deliveryMailbox(ctx, tx, recipient)
+		mailboxes := []*Mailbox{}
+		seen := map[string]bool{}
+		for _, recipient := range recipients {
+			m, err := s.deliveryMailbox(ctx, tx, recipient)
+			if err != nil {
+				return err
+			}
+			key := recipient
+			if m != nil {
+				key = m.ID
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			o := RecipientOutcome{Recipient: recipient, Code: 550}
+			switch {
+			case recipient == "":
+				o.Reason = "No recipient specified"
+			case m == nil:
+				o.Reason = fmt.Sprintf("Mailbox %s does not exist", recipient)
+			case now > m.ExpiresAt:
+				o.Reason = fmt.Sprintf("Mailbox %s has expired", recipient)
+			case !m.IsActive:
+				o.Reason = fmt.Sprintf("Mailbox %s is disabled", recipient)
+			case !senderAllowed(m, msg.From) || !senderDomainAllowed(m, msg.From):
+				o.Reason = fmt.Sprintf("Sender %s not allowed for mailbox %s", msg.From, recipient)
+			case size > s.cfg.MaxEmailSizeBytes:
+				o.Code, o.Reason = 552, "Message size exceeds limit"
+			case size > m.StorageLimit-m.StorageUsed:
+				o.Code, o.Reason = 452, "Mailbox storage is full"
+			default:
+				o.Code, o.Accepted, o.Reason = 250, true, "Email accepted"
+			}
+			if !o.Accepted {
+				result.Rejected++
+			}
+			result.Recipients = append(result.Recipients, o)
+			mailboxes = append(mailboxes, m)
+		}
+		if result.Rejected > 0 {
+			// SMTP DATA 只有一个最终响应，不能在返回失败前提交部分邮箱。
+			for i := range result.Recipients {
+				if result.Recipients[i].Accepted {
+					result.Recipients[i].Accepted = false
+					result.Recipients[i].Code = 0
+					result.Recipients[i].Reason = "Batch not committed"
+				}
+			}
+			result.Rejected = len(result.Recipients)
+			return nil
+		}
+		if len(mailboxes) == 0 {
+			return nil
+		}
+		contentID := any(nil)
+		if msg.Raw != nil {
+			if msg.ID == "" {
+				id, err := uuid.NewRandom()
 				if err != nil {
 					return err
 				}
-				switch {
-				case recipient == "":
-					outcome.Reason = "No recipient specified"
-				case m == nil:
-					outcome.Reason = fmt.Sprintf("Mailbox %s does not exist", recipient)
-				case now > m.ExpiresAt:
-					outcome.Reason = fmt.Sprintf("Mailbox %s has expired", recipient)
-				case !m.IsActive:
-					outcome.Reason = fmt.Sprintf("Mailbox %s is disabled", recipient)
-				case !senderAllowed(m, msg.From) || !senderDomainAllowed(m, msg.From):
-					outcome.Reason = fmt.Sprintf("Sender %s not allowed for mailbox %s", msg.From, recipient)
-				case size > s.cfg.MaxEmailSizeBytes:
-					outcome.Reason = fmt.Sprintf("Failed to save email: 邮件大小 (%.2fMB) 超过限制 (%dMB)", float64(size)/1048576, s.cfg.MaxEmailSizeMB)
-				case size > m.StorageLimit-m.StorageUsed:
-					outcome.Reason = fmt.Sprintf("Failed to save email: 邮箱容量不足，当前已用 %.2fMB，限制 %.2fMB", float64(m.StorageUsed)/1048576, float64(m.StorageLimit)/1048576)
-				default:
-					_, err := tx.ExecContext(ctx, `INSERT INTO emails (id, mailbox_id, from_address,
- to_address, subject, body, content_type, timestamp, sent_formatted, size_bytes)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ids[i], m.ID, email.From, email.To, email.Subject,
-						email.Body, email.ContentType, email.Timestamp, email.Sent, size)
-					if err != nil {
-						return err
-					}
-					if _, err = tx.ExecContext(ctx, `UPDATE mailboxes SET storage_used = COALESCE(storage_used, 0) + ?, last_accessed = ? WHERE id = ?`, size, now, m.ID); err != nil {
-						return err
-					}
-					if _, err = prune(ctx, tx, m.ID, s.cfg.MaxEmailsPerAddress); err != nil {
-						return err
-					}
-					outcome.Accepted, outcome.Reason, outcome.EmailID = true, "Email accepted", ids[i]
-				}
-				seen[recipient] = outcome
+				msg.ID = id.String()
 			}
-			result.Recipients = append(result.Recipients, outcome)
-			if outcome.Accepted {
-				result.Accepted++
-			} else {
-				result.Rejected++
+			if err := store.SaveContent(ctx, tx, msg); err != nil {
+				return err
+			}
+			contentID = msg.ID
+		}
+		for i, m := range mailboxes {
+			id := msg.ID
+			if i > 0 || id == "" {
+				generated, err := uuid.NewRandom()
+				if err != nil {
+					return err
+				}
+				id = generated.String()
+			}
+			_, err := tx.ExecContext(ctx, `INSERT INTO emails (id,mailbox_id,from_address,to_address,subject,body,content_type,timestamp,sent_formatted,size_bytes,content_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`, id, m.ID, email.From, email.To, email.Subject, email.Body, email.ContentType, email.Timestamp, email.Sent, size, contentID)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE mailboxes SET storage_used=COALESCE(storage_used,0)+?,last_accessed=? WHERE id=?`, size, now, m.ID); err != nil {
+				return err
+			}
+			result.Recipients[i].EmailID = id
+			result.Accepted++
+		}
+		for _, m := range mailboxes {
+			if _, err := prune(ctx, tx, m.ID, s.cfg.MaxEmailsPerAddress); err != nil {
+				return err
 			}
 		}
 		return nil

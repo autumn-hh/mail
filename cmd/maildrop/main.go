@@ -22,6 +22,7 @@ import (
 	"maildrop/internal/config"
 	"maildrop/internal/inbox"
 	"maildrop/internal/ipguard"
+	"maildrop/internal/outbound"
 	"maildrop/internal/smtpd"
 	"maildrop/internal/store"
 	"maildrop/internal/web"
@@ -95,10 +96,12 @@ func run() error {
 	blocker := ipguard.NewBlocker(cfg.IPBlockDuration, cfg.IPMaxFailedAttempts, cfg.IPAttemptWindow)
 	whitelist := ipguard.NewWhitelist(cfg.EnableIPWhitelist, cfg.IPWhitelist)
 	inboxSvc := inbox.New(cfg, db, nil)
+	outboundSvc := outbound.New(cfg, db, nil)
 
 	webHandler := web.New(web.Deps{
 		Config:    cfg,
 		Store:     db,
+		Outbound:  outboundSvc,
 		Blocker:   blocker,
 		Whitelist: whitelist,
 		Frontend:  frontend,
@@ -121,6 +124,7 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 	smtpServer := smtpd.New(cfg, inboxSvc, whitelist)
+	smtpServer.SetBounceHandler(outboundSvc)
 	smtpAddr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -135,6 +139,9 @@ func run() error {
 		defer wg.Done()
 		cleanup.Run(ctx, cfg, inboxSvc, blocker)
 	}()
+
+	wg.Add(1)
+	go func() { defer wg.Done(); outboundSvc.Run(ctx) }()
 
 	go func() {
 		slog.Info("web server listening", "addr", httpServer.Addr)

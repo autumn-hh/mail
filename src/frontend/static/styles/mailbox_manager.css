@@ -113,9 +113,9 @@ input[type="checkbox"] { width: 20px; height: 20px; margin: 0; accent-color: var
 @keyframes new-mail-in { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 900px) {
     .workspace { grid-template-columns: 1fr; gap: 28px; padding-top: 28px; }
-    .sidebar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; }
-    .view-nav { display: flex; }
-    .nav-button { width: auto; min-width: 120px; }
+    .sidebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+    .view-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .nav-button { width: 100%; min-width: 0; white-space: nowrap; }
     .switch-panel { width: 220px; margin-top: 0; }
     .sidebar-note { grid-column: 1 / -1; margin-top: 0; }
 }
@@ -125,7 +125,7 @@ input[type="checkbox"] { width: 20px; height: 20px; margin: 0; accent-color: var
     #mailbox-address { max-width: 100%; font-size: 13px; }
     .workspace { width: calc(100% - 32px); padding: 24px 0 48px; }
     .sidebar { grid-template-columns: 1fr; gap: 12px; }
-    .view-nav { gap: 8px; }
+    .view-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .nav-button { flex: 1; min-width: 0; }
     .switch-panel { width: 100%; border-bottom: 0; }
     .switch-panel form { grid-template-columns: 1fr; }
@@ -158,3 +158,30 @@ input[type="checkbox"] { width: 20px; height: 20px; margin: 0; accent-color: var
 }
 @media (max-width: 480px) { .toast-region { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* 收发与附件复用工作台的字号、边界和焦点样式。 */
+.compose-card { padding: 28px; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); }
+.compose-card fieldset { display: grid; gap: 12px; padding: 0; margin: 0; border: 0; min-width: 0; }
+.compose-card label { display: block; font-size: 13px; font-weight: 600; }
+.compose-card input, .compose-card textarea { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--text); background: var(--surface); font: 16px/1.5 var(--font-sans); }
+.compose-card input[readonly] { color: var(--text-muted); background: var(--surface-muted); }
+.compose-card textarea { resize: vertical; }
+.compose-card summary { padding: 10px 0; cursor: pointer; }
+.compose-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.compose-columns label { margin-bottom: 12px; }
+.mail-auth { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 32px; color: var(--text-muted); font-size: 12px; }
+.auth-badge { padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; overflow-wrap: anywhere; }
+.auth-badge.is-fail { color: var(--danger); }
+.attachment-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 32px 16px; }
+.attachment-list:empty, .mail-auth:empty { display: none; }
+.attachment-list .button { white-space: normal; overflow-wrap: anywhere; text-align: left; max-width: 100%; }
+.sent-row { display: grid; gap: 8px; width: 100%; padding: 20px; border: 0; border-bottom: 1px solid var(--border); text-align: left; color: var(--text); background: var(--surface); }
+.sent-row:hover { background: var(--surface-muted); }
+.sent-row small { color: var(--text-muted); overflow-wrap: anywhere; }
+.sent-pagination { margin: 16px 0 24px; }
+.sent-recipient { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
+.sent-detail-content { padding: 24px; }
+.sent-detail-content h3, .sent-detail-content p { overflow-wrap: anywhere; }
+.sent-detail-content .message-body { padding: 24px 0; }
+#compose-result { overflow-wrap: anywhere; }
+@media (max-width: 520px) { .compose-card { padding: 18px; } .compose-columns { grid-template-columns: 1fr; } .mail-auth, .attachment-list { padding-left: 20px; padding-right: 20px; } }

@@ -252,8 +252,8 @@ func (s *Service) CreateMailbox(ctx context.Context, o CreateOptions, actor Acto
 		}
 		// allowed_domains 与邮箱、审计一并提交，失败全部回滚。
 		_, err = tx.ExecContext(ctx, `INSERT INTO mailboxes
- (id,address,created_at,expires_at,retention_days,sender_whitelist,whitelist_enabled,created_by_ip,access_token,mailbox_key,last_accessed,created_source,allowed_domains)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, id.String(), o.Address, now, expires, days, whitelistJSON, Truthy(whitelist), ip, token, key, now, "admin", domainsJSON)
+ (id,address,created_at,expires_at,retention_days,sender_whitelist,whitelist_enabled,created_by_ip,access_token,mailbox_key,last_accessed,created_source,allowed_domains,storage_limit)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id.String(), o.Address, now, expires, days, whitelistJSON, Truthy(whitelist), ip, token, key, now, "admin", domainsJSON, s.cfg.MaxMailboxSizeBytes)
 		if err != nil {
 			return fmt.Errorf("创建失败: %w", err)
 		}
@@ -283,12 +283,18 @@ func (s *Service) UpdateMailbox(ctx context.Context, id string, updates map[stri
 		fields := []string{}
 		args := []any{}
 		changes := map[string]any{}
-		for _, key := range []string{"retention_days", "sender_whitelist", "whitelist_enabled", "is_active", "allowed_domains"} {
+		for _, key := range []string{"retention_days", "sender_whitelist", "whitelist_enabled", "is_active", "allowed_domains", "storage_limit"} {
 			value, ok := updates[key]
 			if !ok {
 				continue
 			}
 			switch key {
+			case "storage_limit":
+				limit, err := Integer(value)
+				if err != nil || limit < 1048576 || limit > 10485760000 {
+					return errors.New("收件容量必须在 1 MiB 至 10000 MiB 之间")
+				}
+				value = limit
 			case "retention_days":
 				var days float64
 				switch v := value.(type) {

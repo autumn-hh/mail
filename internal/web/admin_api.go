@@ -37,6 +37,8 @@ func (s *Server) registerAdminAPI() {
 		{"PUT /api/admin/mailboxes/{id}", api.updateMailbox},
 		{"DELETE /api/admin/mailboxes/{id}", api.deleteMailbox},
 		{"GET /api/admin/mailboxes/{id}/audit-logs", api.auditLogs},
+		{"GET /api/admin/mailboxes/{id}/sending-policy", api.sendingPolicy},
+		{"PUT /api/admin/mailboxes/{id}/sending-policy", api.setSendingPolicy},
 		{"POST /api/admin/mailboxes/{id}/reset-token", api.resetToken},
 		{"POST /api/admin/mailboxes/{id}/enable", api.enableMailbox},
 		{"GET /api/admin/audit-logs", api.auditLogs},

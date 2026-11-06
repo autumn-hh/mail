@@ -106,7 +106,8 @@ async function authenticateMailbox() {
 
     const results = await Promise.allSettled([
         loadMailboxInfo(),
-        loadEmails(true)
+        loadEmails(true),
+        loadSendingPolicy()
     ]);
     const failed = results.find((result) => result.status === 'rejected');
     if (failed) {
@@ -294,7 +295,7 @@ async function refreshAll() {
     MaildropUI.setBusy(button, true);
 
     try {
-        await Promise.all([loadMailboxInfo(), loadEmails(false)]);
+        await Promise.all([loadMailboxInfo(), loadEmails(false), loadSendingPolicy(), state.activeView === 'sent' ? loadSent() : Promise.resolve()]);
         showToast('收件箱已刷新。', 'success');
     } catch (error) {
         handleRequestError(error, '刷新失败，请稍后重试。');
@@ -307,8 +308,10 @@ async function refreshAll() {
 function startPolling() {
     window.clearInterval(state.pollTimer);
     state.pollTimer = window.setInterval(() => {
-        if (!document.hidden && state.activeView === 'inbox') {
-            loadEmails(false).catch((error) => handleRequestError(error, '自动刷新失败。'));
+        if (!document.hidden && state.accessToken) {
+            if (state.activeView === 'inbox') loadEmails(false).catch((error) => handleRequestError(error, '自动刷新失败。'));
+            if (state.activeView === 'sent') loadSent().catch((error) => handleRequestError(error, '发件状态刷新失败。'));
+            loadSendingPolicy().catch((error) => handleRequestError(error, '发件额度刷新失败。'));
         }
     }, POLL_INTERVAL_MS);
 }
@@ -738,6 +741,7 @@ function openEmailDetail(id, pushHistory = true) {
     if (state.activeView === 'inbox') state.inboxScrollY = window.scrollY;
     state.currentEmailId = String(id);
     renderEmailDetail(email);
+    loadMailContent(email).catch((error) => handleRequestError(error, '邮件附件加载失败。'));
     showView('detail');
     if (pushHistory) {
         history.pushState({ view: 'detail', emailId: state.currentEmailId }, '', window.location.href);
@@ -768,7 +772,7 @@ function renderMessageBody(email) {
     const container = document.getElementById('detail-body');
     const body = String(email.Body || '');
     const contentType = String(email.ContentType || '').toLocaleLowerCase();
-    const looksLikeHtml = contentType.includes('html') || /<([a-z][\w-]*)(?:\s[^>]*)?>/i.test(body);
+    const looksLikeHtml = contentType.includes('html');
     container.replaceChildren();
 
     if (!looksLikeHtml) {
@@ -787,17 +791,17 @@ function renderMessageBody(email) {
     iframe.setAttribute('sandbox', '');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
     iframe.setAttribute('loading', 'lazy');
-    iframe.srcdoc = buildIsolatedHtml(body);
+    iframe.srcdoc = buildIsolatedHtml(body, email.inlineImages);
     container.appendChild(iframe);
 }
 
-function buildIsolatedHtml(rawHtml) {
-    const safeBody = sanitizeEmailMarkup(rawHtml);
+function buildIsolatedHtml(rawHtml, inlineImages = new Map()) {
+    const safeBody = sanitizeEmailMarkup(rawHtml, inlineImages);
     const csp = [
         "default-src 'none'",
         "script-src 'none'",
         "connect-src 'none'",
-        "img-src data: cid:",
+        "img-src data:",
         "style-src 'unsafe-inline'",
         "font-src 'none'",
         "media-src 'none'",
@@ -810,13 +814,20 @@ function buildIsolatedHtml(rawHtml) {
     return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}body{margin:0;padding:22px;color:#243430;background:#fff;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}a{color:#236552;text-decoration:underline}pre{white-space:pre-wrap}table{max-width:100%;border-collapse:collapse}</style></head><body>${safeBody}</body></html>`;
 }
 
-function sanitizeEmailMarkup(rawHtml) {
+function sanitizeEmailMarkup(rawHtml, inlineImages = new Map()) {
     // template.content 在离屏惰性文档片段中解析，清洗前不会请求邮件里的外部子资源。
     const template = document.createElement('template');
     template.innerHTML = String(rawHtml);
     const blocked = 'script,form,input,button,textarea,select,option,iframe,frame,frameset,object,embed,applet,base,meta,link,video,audio,source,track';
     template.content.querySelectorAll(blocked).forEach((node) => node.remove());
 
+    template.content.querySelectorAll('img').forEach((image) => {
+        const source = image.getAttribute('src') || '';
+        if (/^cid:/i.test(source)) {
+            const data = inlineImages.get(source.slice(4));
+            if (data) image.setAttribute('src', data); else image.removeAttribute('src');
+        }
+    });
     template.content.querySelectorAll('*').forEach((element) => {
         Array.from(element.attributes).forEach((attribute) => {
             const name = attribute.name.toLocaleLowerCase();
@@ -864,10 +875,12 @@ function deleteCurrentEmail(event) {
 }
 
 function navigateToView(view) {
-    if (!['inbox', 'info'].includes(view)) {
+    if (!['inbox', 'info', 'compose', 'sent'].includes(view)) {
         return;
     }
     showView(view);
+    if (view === 'sent') loadSent().catch((error) => handleRequestError(error, '发送记录加载失败。'));
+    if (view === 'compose') loadSendingPolicy().catch((error) => handleRequestError(error, '发件额度加载失败。'));
     history.pushState({ view }, '', window.location.href);
 }
 
@@ -893,7 +906,7 @@ function showView(view) {
     if (view !== 'detail') {
         state.currentEmailId = null;
     }
-    setSkipTarget(view === 'detail' ? 'detail-subject' : view === 'info' ? 'info-title' : 'inbox-title');
+    setSkipTarget(view === 'detail' ? 'detail-subject' : `${view}-title`);
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (view === 'inbox' && previousView === 'detail') {
         // 返回阅读前的位置，删除当前邮件后同样恢复到相邻的有效操作。
@@ -912,7 +925,9 @@ function handleHistoryChange(event) {
     if (historyState.view === 'detail' && historyState.emailId) {
         openEmailDetail(String(historyState.emailId), false);
     } else {
-        showView(historyState.view === 'info' ? 'info' : 'inbox');
+        const view = ['info', 'compose', 'sent'].includes(historyState.view) ? historyState.view : 'inbox';
+        showView(view);
+        if (view === 'sent') loadSent().catch((error) => handleRequestError(error, '发送记录加载失败。'));
     }
 }
 

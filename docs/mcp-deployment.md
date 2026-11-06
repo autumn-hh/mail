@@ -46,7 +46,7 @@ ss -lntp '( sport = :25 or sport = :5000 )'
 journalctl -u maildrop --since '15 minutes ago' --no-pager
 ```
 
-公网验证：无认证 /mcp 返回 401；正确凭据完成 initialize、tools/list（35 项）和 stats。收信验证仅创建专用测试邮箱，SMTP 投递测试信，通过 MCP 读取，再删除该测试邮箱。测试覆盖本机 SMTP 到 MCP，外部运营商送达仍依赖 MX、网络与发件方策略。
+公网验证：无认证 /mcp 返回 401；正确凭据完成 initialize、tools/list（本版 41 项）和 stats。收信验证仅创建专用测试邮箱，SMTP 投递测试信，通过 MCP 读取，再删除该测试邮箱。测试覆盖本机 SMTP 到 MCP，外部运营商送达仍依赖 MX、网络与发件方策略。
 
 ## 凭据轮换与撤销
 
@@ -56,7 +56,7 @@ journalctl -u maildrop --since '15 minutes ago' --no-pager
 
 ## 回滚
 
-从 /etc/maildrop/mcp-release.json 读取本次 backup。MCP 本身没有独立数据库表，优先只恢复旧程序和环境，保留部署后新信。
+从 /etc/maildrop/mcp-release.json 读取本次 backup。本版包含出站队列、原文/附件表及一次性容量迁移。优先只恢复旧程序和环境，保留部署后新信；旧程序不会处理新出站队列，应先核对排队记录。不要为回滚直接恢复旧库丢弃新信。
 
 ```bash
 # BACKUP_DIR 设为发布记录中的实际绝对路径
@@ -72,4 +72,4 @@ systemctl is-active maildrop
 
 ## 验证范围
 
-自动测试覆盖真实 MCP HTTP SDK、SQLite、SMTP、35 工具发现、认证/Host/Origin、邮件归属、等待/取消、Unicode 截断、批删回滚、域名保护、凭据隐藏/轮换。部署还需完成副本预演、公网 HTTPS 握手和测试信清理，结果记入发布记录。本次未改前端，不包含全部页面视觉回归。
+自动测试覆盖真实 MCP HTTP SDK、SQLite、SMTP、41 工具发现、认证/Host/Origin、邮件归属、等待/取消、Unicode 截断、批删回滚、域名保护、凭据隐藏/轮换。部署还需完成副本预演、公网 HTTPS 握手和测试信清理，结果记入发布记录。本版新增写信与发送记录页面，应完成收发专项浏览器验收。上线前按 mail-operations.md 配置并验证 DKIM、SMTP 25出口和 DNS；默认不开启出站。MCP 请求上限为16 MiB，需检查反代限制，且不能把返回入队成功当作外部送达成功。

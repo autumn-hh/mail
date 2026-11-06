@@ -47,7 +47,7 @@ func TestMCPCancellationLimitsAndAudit(t *testing.T) {
 	f.expectError(t, "set_mailbox_status", map[string]any{"mailbox": "cancel@example.test", "enabled": "false"})
 	f.expectError(t, "create_mailboxes_batch", map[string]any{"items": []any{}})
 	f.expectError(t, "search_emails", map[string]any{"mailbox": "cancel@example.test", "page_size": 101})
-	request := httptest.NewRequest("POST", "http://localhost/mcp", strings.NewReader(strings.Repeat("x", (1<<20)+1)))
+	request := httptest.NewRequest("POST", "http://localhost/mcp", strings.NewReader(strings.Repeat("x", maxRequestBytes+1)))
 	request.Header.Set("Authorization", "Bearer "+testToken)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
@@ -87,7 +87,7 @@ type fixture struct {
 	smtpAddress string
 }
 
-func setup(t *testing.T) *fixture {
+func setup(t *testing.T, configure ...func(*config.Config)) *fixture {
 	t.Helper()
 	cfg := config.FromEnv(func(k string) string {
 		switch k {
@@ -100,6 +100,9 @@ func setup(t *testing.T) *fixture {
 		}
 		return ""
 	})
+	for _, apply := range configure {
+		apply(cfg)
+	}
 	db, err := store.OpenWithConfig(filepath.Join(t.TempDir(), "mailbox.db"), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +112,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{db: db, cfg: cfg, blocker: ipguard.NewBlocker(300, 100, 60)}
-	f.handler = New(cfg, db, f.blocker)
+	f.handler = New(cfg, db, f.blocker, nil)
 	server := httptest.NewServer(f.handler)
 	t.Cleanup(server.Close)
 	client := mcp.NewClient(&mcp.Implementation{Name: "integration-test", Version: "1"}, nil)
@@ -167,7 +170,7 @@ func TestMCPMailboxSMTPWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 35 {
+	if len(tools.Tools) != toolCount {
 		t.Fatalf("tool count %d", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

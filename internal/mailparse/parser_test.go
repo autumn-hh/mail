@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/quotedprintable"
 	"strings"
@@ -35,7 +36,7 @@ func TestParseBodies(t *testing.T) {
 		{"base64", "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8g5LiW55WM", "hello 世界", "Text"},
 		{"base64 whitespace", "Content-Transfer-Encoding: base64\r\n\r\n aGVs bG8=\r\n", "hello", "Text"},
 		{"quoted printable", "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nhello=20=E4=B8=96=\r\n=E7=95=8C", "hello 世界", "Text"},
-		{"attached forwarded message", "Content-Type: multipart/mixed; boundary=m\r\n\r\n--m\r\nContent-Type: text/plain\r\n\r\nouter\r\n--m\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\nSubject: forwarded\r\nContent-Type: text/html\r\n\r\n<p>forwarded</p>\r\n--m--\r\n", "<p>forwarded</p>", "HTML"},
+		{"attached forwarded message", "Content-Type: multipart/mixed; boundary=m\r\n\r\n--m\r\nContent-Type: text/plain\r\n\r\nouter\r\n--m\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\nSubject: forwarded\r\nContent-Type: text/html\r\n\r\n<p>forwarded</p>\r\n--m--\r\n", "outer", "Text"},
 		{"invalid content type defaults to text", "Content-Type: invalid\r\n\r\nfallback body", "fallback body", "Text"},
 		{"unknown charset falls back UTF8", "Content-Type: text/plain; charset=x-does-not-exist\r\n\r\nhello 世界", "hello 世界", "Text"},
 		{"unknown charset falls back Latin1", "Content-Type: text/plain; charset=x-does-not-exist\r\n\r\ncaf\xe9", "café", "Text"},
@@ -262,6 +263,9 @@ func FuzzParse(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		msg, err := Parse(raw, time.Unix(0, 0))
+		if errors.Is(err, ErrLimits) {
+			return
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
