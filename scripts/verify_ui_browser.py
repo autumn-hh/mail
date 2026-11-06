@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -100,7 +101,7 @@ def fixture_mailbox_key():
 
 
 @contextmanager
-def isolated_site(port=0):
+def isolated_site(port=0, mail_features=False):
     # 先确定临时目录边界，再构建并启动 Go 服务；服务配置只指向该临时目录。
     temp_root = Path(tempfile.mkdtemp(prefix="maildrop-ui-")).resolve()
     assert temp_root.parent == Path(tempfile.gettempdir()).resolve()
@@ -147,8 +148,21 @@ def isolated_site(port=0):
                 "TRUST_PROXY_HOPS": "0",
                 "DOMAINS": "example.test,studio.test",
                 "IP_MAX_FAILED_ATTEMPTS": "1000",
+                "VERIFY_INBOUND": "false",
+                "OUTBOUND_ENABLED": "false",
+                "SMTP_TLS_CERT_FILE": "",
+                "SMTP_TLS_KEY_FILE": "",
+                "MAX_MAILBOX_SIZE_MB": "100",
+                "MAX_EMAIL_SIZE_MB": "20",
             }
         )
+        if mail_features:
+            dkim_dir = temp_root / "dkim"
+            dkim_dir.mkdir()
+            # RFC 8410 Ed25519 PKCS#8: 32 random seed bytes; isolated fixture only.
+            encoded_key = base64.b64encode(bytes.fromhex("302e020100300506032b657004220420") + secrets.token_bytes(32)).decode("ascii")
+            (dkim_dir / "example.test.pem").write_text("-----BEGIN PRIVATE KEY-----\n" + encoded_key + "\n-----END PRIVATE KEY-----\n", encoding="ascii")
+            env.update({"OUTBOUND_ENABLED": "true", "SMTP_HOSTNAME": "mail.example.test", "DKIM_KEY_DIR": str(dkim_dir), "DKIM_SELECTOR": "fixture"})
         server_log = open(
             temp_root / "server.log", "w", encoding="utf-8", errors="replace"
         )
@@ -312,6 +326,8 @@ def isolated_site(port=0):
             "unsafe_id": unsafe_id,
             "ids": ids,
             "server": {"go": go_version},
+            "smtp_port": smtp_port,
+            "db_path": str(db_path),
         }
 
         def expired_guard():

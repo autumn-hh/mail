@@ -1874,7 +1874,7 @@ AdminMailboxManager.prototype.viewMailbox = async function(mailboxId, opener = d
         const allowedDomains = Array.isArray(mailbox.allowed_domains) ? mailbox.allowed_domains : [];
         const storagePercent = Math.min(100, Math.max(0, safeNumber(mailbox.storage_percent)));
         const storageUsed = safeNumber(mailbox.storage_used_mb);
-        const storageLimit = safeNumber(mailbox.storage_limit_mb, 50);
+        const storageLimit = safeNumber(mailbox.storage_limit_mb, 100);
 
         const modal = document.createElement('div');
         modal.className = 'modal';
@@ -2054,6 +2054,7 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId, opener = d
         const mailbox = response.data;
         const senderWhitelist = Array.isArray(mailbox.sender_whitelist) ? mailbox.sender_whitelist : [];
         const allowedDomains = Array.isArray(mailbox.allowed_domains) ? mailbox.allowed_domains : [];
+        const sending = (await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}/sending-policy`)).data;
 
         const modal = document.createElement('div');
         modal.className = 'modal';
@@ -2075,6 +2076,19 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId, opener = d
                             <label for="edit-retention-days">保留天数</label>
                             <input type="number" id="edit-retention-days" min="1" max="36500">
                         </div>
+                        <div class="form-group">
+                            <label for="edit-storage-limit">收件容量（MiB）</label>
+                            <input type="number" id="edit-storage-limit" min="1" max="10000" step="1">
+                        </div>
+                        <fieldset class="form-group">
+                            <legend>发件权限（仅主管理员可调整）</legend>
+                            <label><input type="checkbox" id="edit-sending-enabled"> 允许此邮箱发件</label>
+                            <label for="edit-daily-limit">每日收件人数（北京时间重置）</label><input id="edit-daily-limit" type="number" min="1" max="100000" step="1">
+                            <label for="edit-minute-limit">滚动每分钟收件人数</label><input id="edit-minute-limit" type="number" min="1" max="1000" step="1">
+                            <p class="form-hint">撤销后停止未开始的投递及后续重试。发件存档独立限额 100 MiB，保留 30 天。</p>
+                            <button class="btn btn-secondary" type="button" data-action="save-sending">保存发件权限与额度</button>
+                            <p data-role="sending-result" role="status"></p>
+                        </fieldset>
                         <div class="form-group">
                             <label for="edit-sender-whitelist">发件人白名单</label>
                             <textarea id="edit-sender-whitelist" rows="3"></textarea>
@@ -2109,6 +2123,27 @@ AdminMailboxManager.prototype.editMailbox = async function(mailboxId, opener = d
         // 表单值通过 value/textContent 属性写入，避免 textarea 与属性上下文注入。
         modal.querySelector('[data-role="mailbox-address"]').value = String(mailbox.address ?? '');
         modal.querySelector('#edit-retention-days').value = String(safeNumber(mailbox.retention_days, 30));
+        modal.querySelector('#edit-storage-limit').value = String(safeNumber(mailbox.storage_limit_mb, 100));
+        modal.querySelector('#edit-sending-enabled').checked = Boolean(sending.enabled);
+        modal.querySelector('#edit-daily-limit').value = String(sending.daily_limit);
+        modal.querySelector('#edit-minute-limit').value = String(sending.minute_limit);
+        modal.querySelector('[data-role="sending-result"]').textContent = `今日已用 ${sending.daily_used} 人，最近一分钟 ${sending.minute_used} 人。${sending.reason || ''}`;
+        modal.querySelector('[data-action="save-sending"]').addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            const daily = Number(modal.querySelector('#edit-daily-limit').value);
+            const minute = Number(modal.querySelector('#edit-minute-limit').value);
+            if (!Number.isInteger(daily) || daily < 1 || daily > 100000 || !Number.isInteger(minute) || minute < 1 || minute > 1000) {
+                modal.querySelector('[data-role="sending-result"]').textContent = '请填写有效的发件额度。'; return;
+            }
+            button.disabled = true;
+            try {
+                await this.apiRequest(`/api/admin/mailboxes/${encodeURIComponent(mailboxId)}/sending-policy`, {
+                    method: 'PUT', body: JSON.stringify({ enabled: modal.querySelector('#edit-sending-enabled').checked, daily_limit: daily, minute_limit: minute })
+                });
+                modal.querySelector('[data-role="sending-result"]').textContent = '发件权限与额度已保存。';
+            } catch (error) { modal.querySelector('[data-role="sending-result"]').textContent = error.message || '保存失败。'; }
+            finally { button.disabled = false; }
+        });
         modal.querySelector('#edit-sender-whitelist').value = senderWhitelist.join('\n');
         modal.querySelector('#edit-allowed-domains').value = allowedDomains.join('\n');
         modal.querySelector('#edit-whitelist-enabled').checked = Boolean(mailbox.whitelist_enabled);
@@ -2131,6 +2166,8 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
     const allowedDomainsText = document.getElementById('edit-allowed-domains').value;
     const whitelistEnabled = document.getElementById('edit-whitelist-enabled').checked;
     const isActive = document.getElementById('edit-is-active').checked;
+    const storageMB = Number(document.getElementById('edit-storage-limit').value);
+    if (!Number.isInteger(storageMB) || storageMB < 1 || storageMB > 10000) { this.showToast('error', '收件容量必须在 1 至 10000 MiB 之间'); return; }
 
     const senderWhitelist = whitelistText
         .split('\n')
@@ -2147,7 +2184,8 @@ AdminMailboxManager.prototype.saveMailboxEdit = async function(mailboxId, modal)
             retention_days: retentionDays,
             sender_whitelist: senderWhitelist,
             whitelist_enabled: whitelistEnabled,
-            is_active: isActive
+            is_active: isActive,
+            storage_limit: storageMB * 1048576
         };
 
         // 如果有允许的域名，添加到更新中

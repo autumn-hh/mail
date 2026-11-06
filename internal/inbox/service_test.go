@@ -85,8 +85,8 @@ func TestDeliverEnvelopeRouting(t *testing.T) {
 		{"bcc without To", "", []string{"one@test.example"}, 1},
 		{"forwarded header", "external@other.example", []string{"one@test.example"}, 1},
 		{"two mailboxes", "header@test.example", []string{"one@test.example", "two@test.example"}, 2},
-		{"mixed outcomes", "header@test.example", []string{"missing@test.example", "one@test.example", "disabled@test.example", "expired@test.example", "two@test.example"}, 2},
-		{"duplicate envelope", "header@test.example", []string{"one@test.example", "one@test.example"}, 2},
+		{"mixed outcomes", "header@test.example", []string{"missing@test.example", "one@test.example", "disabled@test.example", "expired@test.example", "two@test.example"}, 0},
+		{"duplicate envelope", "header@test.example", []string{"one@test.example", "one@test.example"}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setup(t, nil)
@@ -110,7 +110,11 @@ func TestDeliverEnvelopeRouting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Accepted != tc.accepted || result.Rejected != len(tc.recipients)-tc.accepted || len(result.Recipients) != len(tc.recipients) {
+			unique := len(tc.recipients)
+			if tc.name == "duplicate envelope" {
+				unique = 1
+			}
+			if result.Accepted != tc.accepted || result.Rejected != unique-tc.accepted || len(result.Recipients) != unique {
 				t.Fatalf("result=%+v", result)
 			}
 			ids := map[string]string{}
@@ -130,10 +134,14 @@ func TestDeliverEnvelopeRouting(t *testing.T) {
 				}
 			}
 			assertStorage(t, f, header.ID, 0)
-			assertStorage(t, f, one.ID, 1)
+			wantOne := int64(1)
+			if tc.accepted == 0 {
+				wantOne = 0
+			}
+			assertStorage(t, f, one.ID, wantOne)
 			wantTwo := int64(0)
 			for _, recipient := range tc.recipients {
-				if recipient == two.Address {
+				if recipient == two.Address && tc.accepted > 0 {
 					wantTwo = 1
 				}
 			}

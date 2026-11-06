@@ -28,6 +28,17 @@ func (s *Server) registerPublicAPI() {
 		{"GET /api/get_domain", api.domain, false},
 		{"GET /api/get_inbox", api.getInbox, true},
 		{"GET /api/get_email", api.getEmail, true},
+		{"GET /api/emails/{id}/content", api.emailContent, true},
+		{"GET /api/emails/{id}/raw", api.emailRaw, true},
+		{"GET /api/emails/{id}/attachments/{attachment}", api.emailAttachment, true},
+		{"GET /api/sending-policy", api.sendingPolicy, true},
+		{"POST /api/send", api.sendEmail, true},
+		{"GET /api/sent", api.sentList, true},
+		{"GET /api/sent/{id}", api.sentDetail, true},
+		{"GET /api/sent/{id}/raw", api.sentRaw, true},
+		{"GET /api/sent/{id}/attachments/{attachment}", api.sentAttachment, true},
+		{"DELETE /api/sent/{id}", api.sentDelete, true},
+		{"GET /api/delivery-reports/{id}/raw", api.reportRaw, true},
 	}
 	for _, route := range routes {
 		s.mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {

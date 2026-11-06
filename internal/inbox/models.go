@@ -102,6 +102,7 @@ func (m MailboxInfo) MarshalJSON() ([]byte, error) {
 }
 
 type RecipientOutcome struct {
+	Code      int    `json:"-"`
 	Recipient string `json:"recipient"`
 	Accepted  bool   `json:"accepted"`
 	Reason    string `json:"reason"`

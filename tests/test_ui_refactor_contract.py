@@ -206,7 +206,7 @@ class UiRefactorContractTest(unittest.TestCase):
         self.assertNotIn('localStorage.setItem', admin_script)
         self.assertNotIn('localStorage.getItem', admin_script)
 
-    def test_credentials_stay_memory_only_and_ui_is_receive_only(self):
+    def test_credentials_stay_memory_only_and_legacy_routes_are_absent(self):
         api_test = read('src/frontend/static/scripts/api_test.js')
         self.assertIn("const path = '/api/get_mailbox_token'", api_test)
         self.assertIn("runReadRequest(mailboxInfoButton, '/api/mailbox_info_v2')", api_test)
@@ -224,15 +224,10 @@ class UiRefactorContractTest(unittest.TestCase):
             ]
         )
         for forbidden in (
-            '写邮件', '回复', '转发', '发件箱', '已发送',
-            'send_test_email', '/api/send', '/mailbox?', '?token=', '&token=',
+            'send_test_email', '/mailbox?', '?token=', '&token=',
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, ui_sources)
-
-        for forbidden_word in ('compose', 'reply', 'forward'):
-            with self.subTest(forbidden_word=forbidden_word):
-                self.assertIsNone(re.search(rf'\b{forbidden_word}\b', ui_sources, flags=re.IGNORECASE))
 
     def test_dialog_sizes_and_focus_behavior_are_consistent(self):
         foundation = read('src/frontend/static/styles/ui_foundation.css')

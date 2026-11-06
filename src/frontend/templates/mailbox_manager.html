@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark">
     <meta name="referrer" content="no-referrer">
     <!-- 为搜索摘要与辅助技术明确收件箱用途。 -->
-    <meta name="description" content="Maildrop 临时邮箱收件箱，用于查看、管理和删除已接收邮件。">
+    <meta name="description" content="Maildrop 邮箱：管理收件、附件与经主管理员授权的发件。">
     <title>收件箱 · Maildrop</title>
     <!-- 在首帧绘制前恢复主题，避免暗色偏好先闪出浅色界面。 -->
     <script src="/static/scripts/theme.js"></script>
@@ -73,6 +73,12 @@
                         <span>收件箱</span>
                         <span class="count-badge" id="unread-badge">0</span>
                     </button>
+                    <button class="nav-button" id="compose-nav" type="button" data-view="compose" hidden>
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#mail"></use></svg><span>写邮件</span>
+                    </button>
+                    <button class="nav-button" type="button" data-view="sent">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#list"></use></svg><span>发送记录</span>
+                    </button>
                     <button class="nav-button" type="button" data-view="info">
                         <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#info"></use></svg>
                         <span>邮箱信息</span>
@@ -97,7 +103,7 @@
 
                 <div class="sidebar-note">
                     <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#shield"></use></svg>
-                    <span>仅收信模式</span>
+                    <span id="sending-note">发件需主管理员授权</span>
                 </div>
             </aside>
 
@@ -145,6 +151,8 @@
                             <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#arrow-left"></use></svg><span>返回收件箱</span>
                         </button>
                         <div class="heading-actions">
+                            <button class="button" id="reply-current" type="button" hidden>回复</button>
+                            <button class="button" id="download-raw" type="button" disabled>下载原文 .eml</button>
                             <button class="button" id="toggle-read" type="button">
                                 <svg class="icon" aria-hidden="true"><use href="/static/icons/maildrop-icons.svg#eye"></use></svg><span>标记未读</span>
                             </button>
@@ -163,8 +171,41 @@
                                 <div><dt>时间</dt><dd id="detail-date">—</dd></div>
                             </dl>
                         </header>
+                        <div class="mail-auth" id="detail-auth" aria-live="polite"></div>
+                        <div class="attachment-list" id="detail-attachments"></div>
                         <div class="message-body" id="detail-body"></div>
                     </article>
+                </section>
+
+                <section class="view" id="compose-view" aria-labelledby="compose-title" hidden>
+                    <div class="view-heading"><div><p class="eyebrow">COMPOSE</p><h2 id="compose-title" tabindex="-1">写邮件</h2><p class="view-subtitle" id="sending-quota">正在读取发件额度…</p></div></div>
+                    <form id="compose-form" class="compose-card">
+                        <fieldset id="compose-fields" disabled>
+                            <label for="compose-from">发件人</label><input id="compose-from" type="email" readonly>
+                            <label for="compose-to">收件人</label><input id="compose-to" type="text" placeholder="多个地址用逗号或分号分隔" autocomplete="off">
+                            <div class="compose-columns">
+                                <div><label for="compose-cc">抄送</label><input id="compose-cc" type="text" autocomplete="off"></div>
+                                <div><label for="compose-bcc">密送</label><input id="compose-bcc" type="text" autocomplete="off"></div>
+                            </div>
+                            <label for="compose-subject">主题</label><input id="compose-subject" type="text" maxlength="500">
+                            <label for="compose-text">正文</label><textarea id="compose-text" rows="10" maxlength="500000"></textarea>
+                            <details><summary>添加 HTML 正文（可选）</summary><label class="sr-only" for="compose-html">HTML 正文</label><textarea id="compose-html" rows="6" maxlength="500000" spellcheck="false"></textarea></details>
+                            <label for="compose-files">附件（最多 10 个，合计 10 MiB）</label><input id="compose-files" type="file" multiple>
+                            <p class="view-subtitle" id="compose-file-summary"></p>
+                            <p class="view-subtitle" id="compose-reply-note" hidden></p>
+                            <div class="heading-actions"><button class="button button-primary" id="send-button" type="submit">发送邮件</button><button class="button" id="clear-draft" type="button">清空草稿</button></div>
+                        </fieldset>
+                        <p id="compose-result" role="status"></p>
+                        <p class="view-subtitle">按收件人数扣减额度，抄送、密送一并计入。对方服务器接受邮件不代表最终送达。</p>
+                    </form>
+                </section>
+
+                <section class="view" id="sent-view" aria-labelledby="sent-title" hidden>
+                    <div class="view-heading"><div><p class="eyebrow">SENT MAIL</p><h2 id="sent-title" tabindex="-1">发送记录</h2><p class="view-subtitle">存档保留 30 天；对方服务器接受不代表最终送达。</p></div><button class="button" id="refresh-sent" type="button">刷新状态</button></div>
+                    <p class="view-subtitle" id="sent-storage"></p>
+                    <div class="sent-list mail-card" id="sent-list" aria-live="polite"></div>
+                    <div class="heading-actions sent-pagination"><button class="button" id="sent-previous" type="button" disabled>上一页</button><button class="button" id="sent-next" type="button" disabled>下一页</button></div>
+                    <article class="detail-card" id="sent-detail" hidden></article>
                 </section>
 
                 <section class="view" id="info-view" aria-labelledby="info-title" hidden>
@@ -228,5 +269,6 @@
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
     <script src="/static/scripts/ui_components.js"></script>
     <script src="/static/scripts/mailbox_manager.js"></script>
+    <script src="/static/scripts/mail_features.js"></script>
 </body>
 </html>

@@ -19,6 +19,14 @@ type Config struct {
 	TrustProxyHops        int
 	SMTPHost              string
 	SMTPPort              int
+	SMTPHostname          string
+	SMTPTLSCertFile       string
+	SMTPTLSKeyFile        string
+	VerifyInbound         bool
+	OutboundEnabled       bool
+	DKIMKeyDir            string
+	DKIMSelector          string
+	OutboundIPv4Only      bool
 	InboxFileName         string
 	MaxInboxSize          int
 	DatabasePath          string
@@ -107,8 +115,13 @@ func FromLookupEnv(lookup func(string) (string, bool)) *Config {
 		EnableIPWhitelist:   boolean("ENABLE_IP_WHITELIST", false), IPWhitelist: text("IP_WHITELIST", "127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8"),
 		MailboxRetentionDays: integer("MAILBOX_RETENTION_DAYS", 30, 1, 0), MaxRetentionDays: integer("MAX_RETENTION_DAYS", 36500, 1, 0),
 		EnableSenderWhitelist: boolean("ENABLE_SENDER_WHITELIST", false),
-		MaxMailboxSizeMB:      integer("MAX_MAILBOX_SIZE_MB", 3, 1, 100), MaxEmailSizeMB: integer("MAX_EMAIL_SIZE_MB", 2, 1, 50),
-		IPBlockDuration: integer("IP_BLOCK_DURATION", 300, 60, 86400), IPMaxFailedAttempts: integer("IP_MAX_FAILED_ATTEMPTS", 3, 1, 100),
+		MaxMailboxSizeMB:      integer("MAX_MAILBOX_SIZE_MB", 100, 1, 10000), MaxEmailSizeMB: integer("MAX_EMAIL_SIZE_MB", 20, 1, 20),
+		SMTPHostname:    text("SMTP_HOSTNAME", ""),
+		SMTPTLSCertFile: text("SMTP_TLS_CERT_FILE", ""), SMTPTLSKeyFile: text("SMTP_TLS_KEY_FILE", ""),
+		VerifyInbound: boolean("VERIFY_INBOUND", true), OutboundEnabled: boolean("OUTBOUND_ENABLED", false),
+		DKIMKeyDir: text("DKIM_KEY_DIR", "data/dkim"), DKIMSelector: text("DKIM_SELECTOR", "maildrop"),
+		OutboundIPv4Only: boolean("OUTBOUND_IPV4_ONLY", true),
+		IPBlockDuration:  integer("IP_BLOCK_DURATION", 300, 60, 86400), IPMaxFailedAttempts: integer("IP_MAX_FAILED_ATTEMPTS", 3, 1, 100),
 		IPAttemptWindow: integer("IP_ATTEMPT_WINDOW", 60, 10, 3600),
 	}
 	c.Domains = strings.Split(c.DomainsStr, ",")
@@ -119,6 +132,9 @@ func FromLookupEnv(lookup func(string) (string, bool)) *Config {
 	c.EmailRetentionTime = int64(c.EmailRetentionSeconds)
 	if c.EmailRetentionTime == 0 {
 		c.EmailRetentionTime = int64(c.EmailRetentionDays) * 86400
+	}
+	if c.MaxMailboxSizeMB == 3 {
+		c.MaxMailboxSizeMB = 100
 	}
 	c.MaxMailboxSizeBytes = int64(c.MaxMailboxSizeMB) * 1024 * 1024
 	c.MaxEmailSizeBytes = int64(c.MaxEmailSizeMB) * 1024 * 1024
