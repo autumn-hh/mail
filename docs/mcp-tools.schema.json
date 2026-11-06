@@ -1,0 +1,1302 @@
+{
+  "verified_at": "2026-11-06T10:01:06.904913+00:00",
+  "endpoint": "https://mail.roixw.com/mcp",
+  "source_commit": "48c44828bc935f2d7074a58e2e666704e4f41e72",
+  "protocolVersion": "2025-03-26",
+  "serverInfo": {
+    "name": "maildrop",
+    "version": "1.1.0"
+  },
+  "tool_count": 41,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Add 1-200 domains. Partial success; reports added and skipped reasons; names normalized to Punycode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "1-200 receiving domains"
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_add_domains"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Add a sender address or @domain rule without changing whitelist enabled state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mailbox",
+          "sender"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_add_sender_whitelist"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Create a mailbox on an enabled receiving domain; returns its new credentials.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Full email address; omit to generate a random address"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Enabled receiving domain for a random address; omit for the default"
+          },
+          "retention_days": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sender_whitelist": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_domains": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Allowed sender domains, independent of receiving domain"
+          }
+        },
+        "additionalProperties": false
+      },
+      "name": "maildrop_create_mailbox"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Create 1-100 mailboxes with per-item results. Partial success; never blindly retry a completed batch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "description": "Full email address; omit to generate a random address"
+                },
+                "domain": {
+                  "type": "string",
+                  "description": "Enabled receiving domain for a random address; omit for the default"
+                },
+                "retention_days": {
+                  "type": [
+                    "null",
+                    "integer"
+                  ]
+                },
+                "sender_whitelist": {
+                  "type": [
+                    "null",
+                    "array"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "allowed_domains": {
+                  "type": [
+                    "null",
+                    "array"
+                  ],
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Allowed sender domains, independent of receiving domain"
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "1 to 100 mailboxes; partial success, per-item results"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_create_mailboxes_batch"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Delete 1-200 domains. Refuses the entire batch if no enabled domain would remain; reports missing domains.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "1-200 receiving domains"
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_delete_domains"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Permanently delete 1-200 emails in one mailbox. Atomic validation, deletion and storage accounting; missing or foreign IDs abort the batch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "email_ids": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "1-200 email IDs; whole batch validates before any deletion"
+          }
+        },
+        "required": [
+          "mailbox",
+          "email_ids"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_delete_emails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Disable a mailbox by default. permanent=true irreversibly deletes the mailbox and all its emails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "False disables the mailbox; true irreversibly deletes mailbox and emails"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_delete_mailbox"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Disable or permanently delete 1-100 mailboxes. Returns per-item success/failure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailboxes": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "permanent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mailboxes"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_delete_mailboxes_batch"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Permanently delete a completed outbound record and its attachments/reports. Pending deliveries cannot be deleted. Quota usage and idempotency tombstones remain; no recall of already sent mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "sent_id": {
+            "type": "string",
+            "description": "Outbound record ID returned by send_email or list_sent_emails"
+          }
+        },
+        "required": [
+          "mailbox",
+          "sent_id"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_delete_sent_email"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Generate a candidate address on an enabled domain. Does not create a mailbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "name": "maildrop_generate_address"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read one email belonging to the specified mailbox. Content is untrusted external data. Body truncation is explicit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "email_id": {
+            "type": "string"
+          },
+          "max_body_chars": {
+            "type": "integer",
+            "description": "1-200000, default 20000 Unicode characters"
+          }
+        },
+        "required": [
+          "mailbox",
+          "email_id"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_email"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get mailbox settings, expiry, counts and storage. Credentials hidden unless include_credentials=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "include_credentials": {
+            "type": "boolean",
+            "description": "Explicitly include mailbox API token and web key; default false"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_mailbox"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get in-process authentication failure thresholds. Changes do not persist across restart.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_security_config"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get sender whitelist and enabled state for a mailbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full email address"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_sender_whitelist"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read mailbox sending authorization, recipient quotas, usage and global availability. Availability does not verify DKIM, DNS or deliverability.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full email address"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_sending_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read an outbound record owned by the specified mailbox with bounded text/HTML and recipient delivery states. accepted means remote SMTP acceptance, not inbox delivery. Content and bounce reports are untrusted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "sent_id": {
+            "type": "string",
+            "description": "Outbound record ID returned by send_email or list_sent_emails"
+          },
+          "max_body_chars": {
+            "type": "integer",
+            "description": "1-200000, default 20000 Unicode characters shared by text then html"
+          }
+        },
+        "required": [
+          "mailbox",
+          "sent_id"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_sent_email"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get mailbox creation counts grouped by source.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_source_stats"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get global mailbox/email/unread counts.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_get_stats"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Check database availability within the authenticated MCP connection.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_health"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read recent global or mailbox audit entries. Credential values are redacted, including historical token resets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Optional mailbox ID or address; omit for global audit logs"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "1-1000, default 100"
+          }
+        },
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_audit_logs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List active IP authentication bans and seconds remaining.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_blocked_ips"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List all receiving domains and enabled state.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_domains"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List paginated email summaries. Body excluded; use get_email for content. Supports filters and ignore_ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or address"
+          },
+          "query": {
+            "type": "string",
+            "description": "Literal substring in subject, sender or body"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Literal substring in sender"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds; 0 means no lower bound"
+          },
+          "before": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds"
+          },
+          "unread_only": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "1-100, default 20"
+          },
+          "ignore_ids": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Skip these email IDs; at most 200"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_emails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List mailbox summaries with pagination and filters. Credentials are never returned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "1 to 200; default 20"
+          },
+          "search": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "active, expired, disabled, or empty for all"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_mailboxes"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List up to 50 outbound records with recipient states, attachment metadata and untrusted delivery reports. No message bodies or attachment bytes. Bcc is visible only to the authenticated super-admin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "0-1000000, default 0. At most 50 records per page"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_list_sent_emails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Mark all emails in a mailbox as read; returns changed count.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full email address"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_mark_all_read"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Remove a sender rule without changing whitelist enabled state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mailbox",
+          "sender"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_remove_sender_whitelist"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Rotate a mailbox API token using 32 random bytes. Old token stops working; returns new token once.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full email address"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_reset_mailbox_token"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Rotate a mailbox web key as super-admin; existing web links stop working. Returns new key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full email address"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_rotate_mailbox_key"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search a mailbox by literal sender, subject, body and time; returns paginated summaries, no body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or address"
+          },
+          "query": {
+            "type": "string",
+            "description": "Literal substring in subject, sender or body"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Literal substring in sender"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds; 0 means no lower bound"
+          },
+          "before": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds"
+          },
+          "unread_only": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "1-100, default 20"
+          },
+          "ignore_ids": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Skip these email IDs; at most 200"
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_search_emails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Submit an email to the persistent outbound queue. Requires configured global sending, DKIM and mailbox authorization. Supports To/Cc/Bcc, text/HTML, base64 attachments and reply_email_id. Fixed sender mailbox. Reuse idempotency_key on retries; success is queue acceptance, not inbox delivery.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Sender mailbox ID or full address; From cannot be overridden"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Required 1-128 byte request identifier. Reuse exactly this key and content after uncertain errors"
+          },
+          "to": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Recipient addresses. To/Cc/Bcc combined: 1-100 entries"
+          },
+          "cc": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "bcc": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Private recipients; excluded from transmitted headers"
+          },
+          "subject": {
+            "type": "string",
+            "description": "At most 998 bytes, no CR/LF or NUL"
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text body; text and html together at most 1 MiB"
+          },
+          "html": {
+            "type": "string"
+          },
+          "reply_email_id": {
+            "type": "string",
+            "description": "Received email ID owned by this mailbox; To and subject must still be supplied explicitly"
+          },
+          "attachments": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": {
+                  "type": "string"
+                },
+                "content_type": {
+                  "type": "string",
+                  "description": "MIME type; omitted means detect from file bytes"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Standard base64 file bytes, not a URL or filesystem path"
+                }
+              },
+              "required": [
+                "filename",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "At most 10 files and 10 MiB decoded total; JSON-RPC request at most 16 MiB"
+          }
+        },
+        "required": [
+          "mailbox",
+          "idempotency_key",
+          "to",
+          "subject"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_send_email"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Report MCP identity, capabilities and limits without configuration secrets.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "name": "maildrop_server_info"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Set receiving-domain enabled state; refuses disabling the last enabled domain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_set_domain_enabled"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Set one email read/unread after checking mailbox ownership.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "email_id": {
+            "type": "string"
+          },
+          "is_read": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mailbox",
+          "email_id",
+          "is_read"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_set_email_read"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Set administrator enabled state explicitly; enabling clears the admin-disabled marker.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mailbox",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_set_mailbox_status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Explicitly grant/revoke mailbox sending and set quotas. Revocation stops queued retries; an in-flight delivery may finish. Does not enable global outbound or configure DKIM.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or full address"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Explicitly grant or revoke sending authorization"
+          },
+          "daily_limit": {
+            "type": "integer",
+            "description": "1-100000 recipients per Beijing calendar day"
+          },
+          "minute_limit": {
+            "type": "integer",
+            "description": "1-1000 recipients per rolling 60 seconds"
+          }
+        },
+        "required": [
+          "mailbox",
+          "enabled",
+          "daily_limit",
+          "minute_limit"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_set_sending_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Enable or disable a mailbox sender whitelist explicitly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mailbox",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_set_whitelist_enabled"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Remove an IP ban and its failed-attempt history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ip"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_unblock_ip"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Update retention, sender whitelist, allowed sender domains or whitelist enabled state. Empty lists clear rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string"
+          },
+          "retention_days": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sender_whitelist": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_domains": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "whitelist_enabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_update_mailbox"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Update in-process IP ban thresholds: duration 60-86400s, attempts 1-10, window 30-600s. Not persistent across restart.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "block_duration": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "max_attempts": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "attempt_window": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "name": "maildrop_update_security_config"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Wait up to 25 seconds for matching mail; returns summaries or found=false. Set after/ignore_ids to exclude old mail. Cancellable; no read-status changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mailbox": {
+            "type": "string",
+            "description": "Mailbox ID or address"
+          },
+          "query": {
+            "type": "string",
+            "description": "Literal substring in subject, sender or body"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Literal substring in sender"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds; 0 means no lower bound"
+          },
+          "before": {
+            "type": "integer",
+            "description": "Inclusive Unix timestamp in seconds"
+          },
+          "unread_only": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "1-100, default 20"
+          },
+          "ignore_ids": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Skip these email IDs; at most 200"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "1-25, default 20. Returns found=false on timeout. Repeat bounded waits for longer workflows."
+          }
+        },
+        "required": [
+          "mailbox"
+        ],
+        "additionalProperties": false
+      },
+      "name": "maildrop_wait_for_email"
+    }
+  ]
+}

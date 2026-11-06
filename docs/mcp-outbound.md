@@ -1,10 +1,10 @@
 # MCP 发信工具参考（1.1.0）
 
-本版在原35个工具之外增加6项，共41项。仅供持有独立MCP超级管理员Token的客户端使用；mailbox可传已有邮箱ID或完整地址。代码同步不代表已上线，实际版本以initialize和tools/list为准。
+本版在原35个工具之外增加6项，共41项。**2026-11-06 已部署并通过公网 initialize / tools/list 复核为1.1.0。** 仅供持有独立MCP超级管理员Token的客户端使用；mailbox可传已有邮箱ID或完整地址。原始参数定义见[线上工具 Schema 快照](mcp-tools.schema.json)，HTTP接口见[API文档](../API_DOCUMENTATION.md)。
 
 ## 前提
 
-服务器需配置OUTBOUND_ENABLED=true、SMTP_HOSTNAME和发件域DKIM密钥；邮箱必须由管理员显式授权。工具不会生成密钥、修改DNS、打开服务器出站开关。配置方法见[收发运行说明](mail-operations.md)。
+服务器需配置OUTBOUND_ENABLED=true、SMTP_HOSTNAME和发件域DKIM密钥；邮箱必须由管理员显式授权。当前生产已完成全局配置，现有邮箱不会自动获得发信权限。工具不会生成密钥、修改DNS、打开服务器出站开关。配置方法见[收发运行说明](mail-operations.md)。
 
 所有例子为tools/call的params。返回值位于result.structuredContent；业务失败通常为result.isError=true，content含错误文字和状态码前缀，这些前缀不是JSON-RPC HTTP状态码。鉴权、Host/Origin和请求体过大仍可能在HTTP层拒绝。
 
@@ -16,13 +16,13 @@
 {"name":"maildrop_get_sending_policy","arguments":{"mailbox":"sender@example.com"}}
 ~~~
 
-成功示例：
+成功示例（服务器已配置，该邮箱尚未授权）：
 
 ~~~json
-{"enabled":false,"daily_limit":100,"minute_limit":10,"daily_used":0,"minute_used":0,"storage_used":0,"storage_limit":104857600,"available":false,"reason":"服务器尚未配置发件，请联系主管理员"}
+{"enabled":false,"daily_limit":100,"minute_limit":10,"daily_used":0,"minute_used":0,"storage_used":0,"storage_limit":104857600,"available":true}
 ~~~
 
-enabled是邮箱授权；available仅检查全局开关和SMTP_HOSTNAME格式，不证明DKIM、DNS、SMTP25或送达正常。每日额度按北京时间零点重置，分钟额度是滚动60秒。used是去重收件人数；storage字段为字节，存档限额100 MiB。邮箱不存在返回工具错误；无副作用。
+enabled是邮箱授权；available仅检查全局开关和SMTP_HOSTNAME格式，不证明DKIM、DNS、SMTP25或送达正常；false时还返回reason。每日额度按北京时间零点重置，分钟额度是滚动60秒。used是去重收件人数；storage字段为字节，存档限额100 MiB。邮箱不存在返回工具错误；无副作用。
 
 ## 37. maildrop_set_sending_policy
 
@@ -125,4 +125,15 @@ mailbox和sent_id必填：
 3. 网络超时或内部错误时复用原键和原参数；用get_sent_email查询投递状态和不确定标记。
 4. 仅删除已结束记录；DNS、PTR、SPF/DKIM/DMARC及公网投递仍需目标服务器验收。
 
-新工具不提供附件/EML下载，下载沿用邮箱身份HTTP API。测试使用临时库、临时DKIM密钥与保留域名，不向外部真实邮箱发信。
+新工具不提供附件/EML下载，下载沿用邮箱身份HTTP API。自动化测试使用临时库、临时DKIM密钥与保留域名。生产部署另经用户授权完成一次 roixw.com → QQ 实投，收件人确认在垃圾邮件中收到；accepted 不保证进入收件箱。
+
+## 与 HTTP API 的对应关系
+
+| MCP 工具 | HTTP 接口 | 关键差异 |
+| --- | --- | --- |
+| maildrop_get_sending_policy | GET /api/sending-policy | MCP 显式指定mailbox；HTTP从邮箱Token推导 |
+| maildrop_set_sending_policy | PUT /api/admin/mailboxes/{id}/sending-policy | MCP返回策略；HTTP返回success/message，HTTP使用主管理员密码 |
+| maildrop_send_email | POST /api/send | MCP的idempotency_key在arguments中；HTTP使用Idempotency-Key头。MCP返回email摘要和content_trust；HTTP 202直接返回含正文记录 |
+| maildrop_list_sent_emails | GET /api/sent?offset=0 | MCP返回emails及分页元数据；HTTP直接返回数组 |
+| maildrop_get_sent_email | GET /api/sent/{id} | MCP正文有字符上限并标注截断；HTTP直接返回完整记录 |
+| maildrop_delete_sent_email | DELETE /api/sent/{id} | 均拒绝删除待投递记录，均不返还额度、不撤回已发送邮件 |

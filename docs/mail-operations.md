@@ -6,7 +6,7 @@
 
 ## 发件规则
 
-只有主管理员可通过后台邮箱编辑窗口或 `PUT /api/admin/mailboxes/{id}/sending-policy` 开通、撤销发件与修改额度。子管理员和普通邮箱令牌不能修改策略，新邮箱默认未授权。
+只有主管理员可通过后台邮箱编辑窗口、`PUT /api/admin/mailboxes/{id}/sending-policy` 或持有独立超管 Token 的 MCP `maildrop_set_sending_policy` 开通、撤销发件与修改额度。子管理员和普通邮箱令牌不能修改策略，新邮箱默认未授权。
 
 默认每邮箱每天 100 个收件人、滚动 60 秒内 10 个收件人。每日按北京时间 00:00 重置。To、Cc、Bcc 都计入，同一封中重复的相同地址只投递和计数一次。请求成功入队时原子预扣；失败、退信、删除记录或重试不退额度、不重复扣额。
 
@@ -69,6 +69,8 @@ openssl pkey -in data/dkim/example.com.pem -pubout -outform DER | openssl base64
 
 ## HTTP API
 
+完整参数、响应结构、错误码及调用示例见 [API 文档](../API_DOCUMENTATION.md)；MCP 对应能力见 [发信工具参考](mcp-outbound.md)。本节为路由摘要。
+
 邮箱接口一律 `Authorization: Bearer <邮箱 access_token>`，不能把令牌放入 URL。每次请求重新检查邮箱状态及归属；API 响应 `Cache-Control: no-store`。管理员策略接口使用主管理员 Bearer 密码。
 
 | 方法与路径 | 用途 |
@@ -77,7 +79,7 @@ openssl pkey -in data/dkim/example.com.pem -pubout -outform DER | openssl base64
 | GET `/api/emails/{id}/raw` | 下载收到的 `.eml` |
 | GET `/api/emails/{id}/attachments/{attachment_id}` | 下载指定附件；一律 attachment + nosniff |
 | GET `/api/sending-policy` | 发件授权、额度、用量、发件存档用量 |
-| POST `/api/send` | 提交邮件，必填 `Idempotency-Key` 头（1–128 字符） |
+| POST `/api/send` | 提交邮件，必填 `Idempotency-Key` 头（1–128 字节） |
 | GET `/api/sent?offset=0` | 发送记录，每页 50 条 |
 | GET `/api/sent/{id}` | 邮件内容、收件人状态和退信报告摘要 |
 | GET `/api/sent/{id}/raw` | 下载发件原文，不含 Bcc |

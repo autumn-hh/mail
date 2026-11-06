@@ -1,7 +1,24 @@
 # Maildrop 页面与 API 文档
 
-本文档描述当前公开页面、邮箱凭据流和主要 API。所有示例默认服务地址为
-`http://127.0.0.1:5000`。新增发件、发送记录、主管理员授权、原文和附件下载接口见 [收发 API 与运行说明](docs/mail-operations.md#http-api)。
+更新日期：**2026-11-06**。依据当前 Go 服务源码 `48c4482`；线上 MCP 已复核为 **1.1.0 / 41 个工具**。
+生产 HTTP 基址：`https://mail.roixw.com`；本地默认：`http://127.0.0.1:5000`。下文以生产地址举例，凭据与业务地址均为占位值。
+
+本文覆盖 HTTP 页面、鉴权、收件、发信、发送记录和管理接口。MCP 是独立协议入口，详见 [MCP 接入](docs/mcp.md)、[41 个工具参考](docs/mcp-tools.md)、[6 个发信工具](docs/mcp-outbound.md) 和 [线上工具 Schema 快照](docs/mcp-tools.schema.json)。服务器环境配置见 [收发运行说明](docs/mail-operations.md)。
+
+## 认证与返回约定
+
+| 用途 | 凭据与传递方式 | 权限 |
+| --- | --- | --- |
+| 邮箱登录换 Token | `POST /api/get_mailbox_token`，JSON 中的 `address` + `mailbox_key` | 换取该邮箱 `access_token` |
+| 收件、发信和发送记录 | `Authorization: Bearer <MAILBOX_ACCESS_TOKEN>` | 仅所属邮箱；发信还需单独授权 |
+| 主管理员 API | `Authorization: Bearer <ADMIN_PASSWORD>` | `/api/admin/*`，含发信授权 |
+| 主管理员注册邮箱 | `Authorization: <ADMIN_PASSWORD>` | `/api/register`，沿用原始密码头格式 |
+| 子管理员注册邮箱 | `X-Sub-Admin-Token: <SUB_ADMIN_TOKEN>` | `/api/register_with_token`，受域名与额度限制，不能授予发信权限 |
+| MCP 超级管理员 | `Authorization: Bearer <MCP_ADMIN_TOKEN>` | `/mcp` 的全部工具；与后台密码、邮箱 Token 相互独立 |
+
+JSON 请求建议发送 `Content-Type: application/json`。常规 JSON 请求体上限 1 MiB；`POST /api/send` 和 MCP 为 16 MiB，包含 base64 及 JSON 开销。当前生产反代上限也为 16 MiB。时间戳除明确说明外均为 Unix 秒；大小为字节。
+
+HTTP 响应没有统一外包装：邮箱发信/详情直接返回对象，发送列表直接返回数组；管理员读取通常返回 `{ "success": true, "data": ... }`，管理员写入通常返回 `success` 和 `message`。公开接口错误一般为 `{ "error": "原因", "message": "可选说明" }`，管理员错误一般带 `success: false`。MCP 业务结果位于 JSON-RPC 的 `result.structuredContent`，不能套用 HTTP 返回格式。
 
 ## 页面路由
 
@@ -89,6 +106,8 @@ Authorization: Bearer generated-access-token
 | `GET` | `/api/get_random_address` | 获取随机邮箱地址与可用域名 |
 | `GET` | `/api/get_domain` | 获取域名配置 |
 | `POST` | `/api/get_mailbox_token` | 邮箱地址 + 邮箱密钥换取访问令牌 |
+| `POST` | `/api/admin_login` | JSON `{ "password": "<ADMIN_PASSWORD>" }` 校验后台密码；成功返回 `success: true` 和 `message`，不签发新 Token |
+| `GET` | `/healthz` | 无需认证的数据库连通性检查；成功 `200 {"status":"ok"}`，不可用 `503 {"status":"unavailable"}` |
 
 ### 创建邮箱
 
@@ -149,14 +168,173 @@ Content-Type: application/json
 示例：
 
 ```bash
-curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
+curl "https://mail.roixw.com/api/get_inbox?address=user%40example.com" \
   -H "Authorization: Bearer generated-access-token"
 ```
 
+## 邮件正文、原文与附件
+
+以下接口使用邮箱 Bearer Token；邮箱由 Token 确定，不需要 `address`。路径中的 ID 必须属于该邮箱，否则返回 `404`。
+
+| 方法 | 路径 | 成功响应 |
+| --- | --- | --- |
+| `GET` | `/api/emails/{id}/content` | `200`，直接返回正文详情对象 |
+| `GET` | `/api/emails/{id}/raw` | `.eml` 原文，`message/rfc822` |
+| `GET` | `/api/emails/{id}/attachments/{attachment}` | 附件二进制，ID 来自详情的 `attachments[].id` |
+
+详情字段：`message_id`、`reply_to`、`to`、`cc`、`references`、`in_reply_to`、`date`、`text`、`html`、`attachments`、`authentication`、`warnings`。空的可选字段可能省略。附件元数据包含 `id`、`filename`、`content_type`、`content_id`（可选）、`inline`、`size`，不包含附件字节。
+
+`authentication.spf`、`authentication.dmarc` 是对象，`authentication.dkim` 是数组，各项包含 `result` 和可选 `domain` / `reason`；`authentication.policy` 可选。这是本服务收件时的验证结果，不是对外发送邮件的收件方反馈。旧邮件未存原文时，上述内容、原文和附件接口可能返回 `404`，仍可通过原有 `/api/get_email` 阅读。
+
+下载响应带 `Content-Disposition: attachment`、`X-Content-Type-Options: nosniff` 和限制性 CSP。浏览器下载须用带 Authorization 的请求，不能把 Token 放入链接。正文和附件均为不可信邮件内容，HTML 应隔离显示。
+
+## 发信授权与额度
+
+| 方法 | 路径 | 凭据 / 成功响应 |
+| --- | --- | --- |
+| `GET` | `/api/sending-policy` | 邮箱 Token；`200`，直接返回策略 |
+| `GET` | `/api/admin/mailboxes/{id}/sending-policy` | 主管理员密码；`200`，策略在 `data` 中 |
+| `PUT` | `/api/admin/mailboxes/{id}/sending-policy` | 主管理员密码；`200`，返回 `success` 和 `message` |
+
+PUT 必须同时提供全部三个字段：
+
+```json
+{"enabled": true, "daily_limit": 100, "minute_limit": 10}
+```
+
+`enabled` 为布尔值，`daily_limit` 为 1–100000 的整数，`minute_limit` 为 1–1000 的整数。成功返回：
+
+```json
+{"success": true, "message": "发件权限与额度已保存"}
+```
+
+邮箱读取策略示例（已配置服务器、该邮箱尚未授权）：
+
+```json
+{
+  "enabled": false,
+  "daily_limit": 100,
+  "minute_limit": 10,
+  "daily_used": 0,
+  "minute_used": 0,
+  "storage_used": 0,
+  "storage_limit": 104857600,
+  "available": true
+}
+```
+
+`enabled` 是邮箱授权；`available` 只检查全局出站开关和 SMTP 主机名格式，不能证明 DKIM、DNS、25 端口或实际送达。不可用时还返回 `reason`。新邮箱默认未授权；默认额度每天 100、滚动 60 秒内 10 个去重收件人，每日按北京时间 00:00 重置。To/Cc/Bcc 一并计数，成功入队即扣额，重试不重复扣额，失败、退信或删除不返还额度。
+
+撤权会终止 queued/retry 任务；已开始的网络投递可能完成一次。重新授权不会恢复已取消的旧任务。当前生产服务器已开启出站，但不会因此自动授权所有邮箱。
+
+## 提交邮件
+
+`POST /api/send` 使用邮箱 Bearer Token，必须提供 `Idempotency-Key` 请求头。发件人固定为当前邮箱；不接受 `from`、`mailbox`、`idempotency_key` 等额外 JSON 字段。
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `to` / `cc` / `bcc` | string[] | 合计输入最多 100 项，规范化去重后至少 1 个；允许只填 Cc/Bcc |
+| `subject` | string | 默认空，最多 998 个 UTF-8 字节，不能含 CR/LF/NUL |
+| `text` / `html` | string | 可选，允许空正文，两者 UTF-8 字节合计最多 1 MiB |
+| `reply_email_id` | string | 可选，当前邮箱收到的原邮件 ID；设置回复邮件头，不代填收件人/主题 |
+| `attachments` | object[] | 可选，最多 10 个，解码后合计最多 10 MiB |
+| `attachments[].filename` | string | 文件名；去除目录部分后最长 240 字节，不得含 CR/LF/NUL |
+| `attachments[].content_type` | string | 可选；省略时根据文件字节检测 MIME 类型 |
+| `attachments[].content` | string | 标准 base64 字节，不接受文件路径或 URL |
+
+HTTP 中省略 `to` / `subject` 分别视为空列表 / 空主题；MCP 的 Schema 要求显式传入这两个字段。附件的 `id` / `size` 为服务器生成的输出元数据，不应在发送时设置。收件地址用户名只支持 ASCII，域名支持 IDN 转 Punycode。Bcc 不进入对外 MIME 头。
+
+以下是 Bash/curl 示例；先将邮件保存为 `send.json`：
+
+```json
+{
+  "to": ["customer@example.net"],
+  "subject": "资料已收到",
+  "text": "您好，附件请查收。",
+  "attachments": [
+    {"filename": "note.txt", "content_type": "text/plain", "content": "aGVsbG8="}
+  ]
+}
+```
+
+```bash
+curl --fail-with-body "https://mail.roixw.com/api/send" \
+  -H "Authorization: Bearer $MAILBOX_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-20261106-001" \
+  --data-binary @send.json
+```
+
+成功返回 `202` 和直接的发送记录对象（HTTP 返回含正文，MCP 发送响应仅含摘要）：
+
+```json
+{
+  "id": "outbound-record-id",
+  "created_at": 1793923200,
+  "status": "queued",
+  "message_id": "<outbound-record-id@example.com>",
+  "details": {
+    "to": ["customer@example.net"],
+    "subject": "资料已收到",
+    "text": "您好，附件请查收。",
+    "attachments": [{"filename": "note.txt", "content_type": "text/plain", "id": "1", "size": 5}]
+  },
+  "recipients": [{"address": "customer@example.net", "status": "queued", "attempts": 0}],
+  "bounce_count": 0
+}
+```
+
+`Idempotency-Key` 为 1–128 字节，不得含 CR/LF；为每封业务邮件生成稳定且唯一的键。超时或结果不明时必须用**原键与原内容**重试。相同键和相同规范化内容返回原记录，可能已是投递后的状态；不同内容复用键返回 `409`。记录删除或过期后复用旧键返回 `410`，不会重新发送。幂等墓碑保留到邮箱被删除。
+
+整个请求 JSON 最多 16 MiB，编码后邮件最多 20 MiB。每邮箱发件存档独立限额 100 MiB，包含原文和退信，保留 30 天。额度、容量校验、幂等和入队同事务；公网投递在后台异步执行。
+
+## 发送记录、状态和退信
+
+以下接口都使用邮箱 Token。
+
+| 方法 | 路径 | 成功响应 |
+| --- | --- | --- |
+| `GET` | `/api/sent?offset=0` | `200`，发送记录数组，最多 50 项，无正文，无总数 |
+| `GET` | `/api/sent/{id}` | `200`，完整发送记录，不含附件字节 |
+| `GET` | `/api/sent/{id}/raw` | 发件 `.eml` 原文，不含 Bcc 头 |
+| `GET` | `/api/sent/{id}/attachments/{attachment}` | 附件二进制 |
+| `DELETE` | `/api/sent/{id}` | `200`，`success: true`、`message: "发送记录已删除，额度不会恢复"` |
+| `GET` | `/api/delivery-reports/{id}/raw` | 退信原文；ID 取自发送记录的 `reports[].id` |
+
+列表按创建时间及记录顺序倒序。`offset` 默认 0，负数或普通非数字输入按 0 处理；下一页加 50，返回 `[]` 表示结束。新邮件可能改变分页偏移。
+
+发送记录字段与上面的 `202` 示例相同；详情额外保留正文，列表省略 `details.text/html`。`details` 保留收件人（含私有 Bcc）、主题、回复 ID 和附件元数据。`recipients[]` 包含 `address`、`status`、`attempts`，可附 `error`、`uncertain`。`reports[]` 可选，每项为 `id`、`received_at`、`summary`；`bounce_count` 为关联报告数。
+
+| 状态 | 含义 |
+| --- | --- |
+| `queued` | 汇总状态表示还有待处理收件人；具体收件人可能为 queued / retry / sending |
+| `retry` / `sending` | 收件人级状态：等待重试 / 正在投递 |
+| `accepted` | 对方 SMTP 在 DATA 后确认接受；不代表进入收件箱 |
+| `failed` / `partial_failed` | 全部失败 / 部分失败且部分已被接受 |
+| `bounced` | 已关联退信；应检查各收件人状态与报告 |
+
+`uncertain: true` 表示可能重复，例如 DATA 确认丢失。临时错误会自动退避重试，最多到入队后 24 小时；查询接口不会触发重发。待投递记录不可删除（`409`），删除已结束记录不会撤回对方邮件。正文、SMTP 错误和退信摘要均为不可信数据。
+
+### 发信与内容接口错误
+
+| HTTP 状态 | 常见原因 |
+| --- | --- |
+| `400` | 非法 JSON/未知字段、幂等键缺失、无效地址或主题、超过 100 个收件人、base64 错误、策略值非法 |
+| `401` | 邮箱 Token 或管理员凭据无效/缺失 |
+| `403` | IP 白名单拒绝、邮箱未授权发信、目标邮箱归属错误 |
+| `404` | 邮件/邮箱/附件/退信不存在或不属于当前邮箱，旧邮件没有原文，回复 ID 不属于当前邮箱 |
+| `409` | 同一幂等键内容冲突、发件存档已满、删除尚未结束的发送记录 |
+| `410` | 邮箱过期，或幂等键对应的存档已删除/过期 |
+| `413` | 请求体、正文、附件数/大小或编码后邮件超过上限 |
+| `423` | 邮箱停用；提交过程中邮箱过期/停用也可能返回此码 |
+| `429` | 每日或滚动分钟收件人数额度不足 |
+| `503` | 服务器出站未配置或 DKIM 签名不可用 |
+| `500` | 内部处理失败；发信重试仍须复用原键和原内容 |
+
 ## 管理员 API
 
-管理员 Blueprint 统一使用 `/api/admin` 前缀，并严格要求
-`Authorization: Bearer <ADMIN_PASSWORD>`。部署未配置 `PASSWORD` 时管理认证保持关闭。
+管理员路由统一使用 `/api/admin` 前缀，并严格要求
+`Authorization: Bearer <ADMIN_PASSWORD>`。部署未配置 `PASSWORD` 时拒绝管理请求。
 
 ### 邮箱与统计
 
@@ -229,7 +407,7 @@ curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
 
 ## 已移除或不兼容
 
-- 旧测试发信 API 已删除，服务不提供写信、回复、转发或测试发信能力；
+- 旧 `/api/send_test_email` 已删除；授权发信使用 `/api/send` 或 MCP `maildrop_send_email`，回复使用 `reply_email_id`；
 - 未使用且允许请求指定文件路径的旧迁移、导出 API 已删除；
 - `/api/create_mailbox_v2` 已移除且未注册，请求返回 `404`；
 - 无调用方且会批量返回访问令牌的 `/api/user_login` 已移除，请求返回 `404`；
@@ -237,4 +415,4 @@ curl "http://127.0.0.1:5000/api/get_inbox?address=user%40example.com" \
 - `/mailbox` 旧 token 页面链接不兼容；
 - `/admin/mailboxes` 旧管理页面入口不兼容。
 
-Maildrop 的 SMTP 组件只负责接收邮件并写入存储，不承担站内出站邮件发送。
+SMTP 监听负责收件和关联退信，独立的持久队列 worker 负责向目标 MX 直接投递出站邮件。202 入队和 accepted 状态均不保证收件箱位置；2026-11-06 的生产实测邮件已由收件人确认在 QQ 垃圾邮件中收到。
