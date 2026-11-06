@@ -8,7 +8,7 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 **Now with V2 Features:**
 *   **Single Go Binary:** Web UI, REST API and SMTP server in one self-contained executable.
 *   **Super-admin MCP:** 41 tools at `/mcp` with independent Bearer authentication, including authorized outbound sending and delivery records. See [MCP 接入与工具](docs/mcp.md) and [部署与运维](docs/mcp-deployment.md).
-    Detailed reference: [41 个工具的参数、返回值与调用示例](docs/mcp-tools.md).
+    Detailed reference: [41 个工具的参数、返回值与调用示例](docs/mcp-tools.md), [发信工具](docs/mcp-outbound.md), [工具 Schema](docs/mcp-tools.schema.json).
 *   **Database Storage:** Robust SQLite support for better performance and data integrity.
 *   **Credential Access:** Mailbox key exchange followed by Bearer-token API access, with a separate admin password.
 *   **Enhanced API:** Comprehensive RESTful API V2 for integration and management.
@@ -41,6 +41,8 @@ Maildrop is a self hostable and easy to use disposable email service that allows
 Authorized mailboxes can also compose, reply, attach files and track delivery through the web UI or API. Sending is disabled by default and can only be granted by the main administrator. Incoming mail supports attachments, inline images, original `.eml` downloads and SPF/DKIM/DMARC results. New inboxes default to 100 MiB, with a 20 MiB incoming message limit.
 
 See [mail operations](docs/mail-operations.md) for sending quotas, TLS certificates, per-domain DKIM keys, DNS requirements and the new API routes.
+
+HTTP integration: [最新 API 文档](API_DOCUMENTATION.md) (2026-11-06), covering authentication, outbound permissions, attachments, idempotency, delivery status and errors.
 
 ### Planned Features
 

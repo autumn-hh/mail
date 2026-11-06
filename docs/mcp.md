@@ -1,6 +1,10 @@
 # Maildrop MCP 接入与工具
 
-MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层、持久投递队列和 SQLite。当前仅支持超级管理员，可管理全部邮箱，不提供子管理员管理或邮箱身份认证。1.1.0 新增发信工具；需部署本版、完成出站配置并为邮箱授权后才能使用。
+MCP 与 Web、SMTP 运行在同一 Go 进程，共用业务层、持久投递队列和 SQLite。当前仅支持超级管理员，可管理全部邮箱，不提供子管理员管理或邮箱身份认证。
+
+**2026-11-06 已部署并复核：MCP 1.1.0，41 个工具，服务源码 `48c4482`。** 生产入口 `https://mail.roixw.com/mcp` 的 initialize、tools/list 和 maildrop_server_info 已验证，`outbound_enabled=true`。具体邮箱仍需单独授权发信。更新客户端工具列表或重连后可发现新增 6 项工具。
+
+线上 [工具 Schema 快照](mcp-tools.schema.json) 包含版本、采集时间及 41 项原始工具定义，不含凭据或邮件数据；这是 tools/list 的快照，不是客户端连接配置，也不是 HTTP OpenAPI。运行时以 tools/list 为准。HTTP API 见 [完整接口文档](../API_DOCUMENTATION.md)。
 
 需要逐项接入时，请阅读 [41 个工具的详细参考](mcp-tools.md)：包含每项参数类型、必填与默认值、请求和返回示例、返回字段、失败条件、审计及操作流程。
 
