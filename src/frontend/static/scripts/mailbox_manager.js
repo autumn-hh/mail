@@ -740,8 +740,8 @@ function openEmailDetail(id, pushHistory = true) {
     state.returnFocusId = String(id);
     if (state.activeView === 'inbox') state.inboxScrollY = window.scrollY;
     state.currentEmailId = String(id);
-    renderEmailDetail(email);
-    loadMailContent(email).catch((error) => handleRequestError(error, '邮件附件加载失败。'));
+    const updateInlineImages = renderEmailDetail(email);
+    loadMailContent(email, updateInlineImages).catch((error) => handleRequestError(error, '邮件附件加载失败。'));
     showView('detail');
     if (pushHistory) {
         history.pushState({ view: 'detail', emailId: state.currentEmailId }, '', window.location.href);
@@ -758,7 +758,7 @@ function renderEmailDetail(email) {
     document.getElementById('detail-date').textContent = formatFullDate(email.Timestamp, email.Sent);
     document.getElementById('detail-status').textContent = email.is_read ? '已读邮件' : '未读邮件';
     updateDetailReadButton(email);
-    renderMessageBody(email);
+    return renderMessageBody(email);
 }
 
 function updateDetailReadButton(email) {
@@ -784,73 +784,108 @@ function renderMessageBody(email) {
         return;
     }
 
-    // HTML 邮件放入无任何权限的 sandbox iframe；srcdoc 内 CSP 再阻断脚本、表单、导航与外网资源。
-    const iframe = document.createElement('iframe');
-    iframe.className = 'message-frame';
-    iframe.title = `邮件正文：${email.Subject || '无主题'}`;
-    iframe.setAttribute('sandbox', '');
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
-    iframe.setAttribute('loading', 'lazy');
-    iframe.srcdoc = buildIsolatedHtml(body, email.inlineImages);
-    container.appendChild(iframe);
+    return appendHtmlPreview(container, body, '邮件正文：' + (email.Subject || '无主题'));
 }
 
-function buildIsolatedHtml(rawHtml, inlineImages = new Map()) {
-    const safeBody = sanitizeEmailMarkup(rawHtml, inlineImages);
-    const csp = [
-        "default-src 'none'",
-        "script-src 'none'",
-        "connect-src 'none'",
-        "img-src data:",
-        "style-src 'unsafe-inline'",
-        "font-src 'none'",
-        "media-src 'none'",
-        "frame-src 'none'",
-        "object-src 'none'",
-        "form-action 'none'",
-        "base-uri 'none'"
-    ].join('; ');
+function appendHtmlPreview(container, rawHtml, title, inlineImages = new Map()) {
+    const host = document.createElement('iframe');
+    host.className = 'message-frame';
+    host.title = title;
+    host.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+    host.referrerPolicy = 'no-referrer';
+    let allowExternalImages = false;
+    let messageFrame;
+    const imageButton = document.createElement('button');
+    imageButton.type = 'button';
+    imageButton.className = 'button';
+    imageButton.textContent = '显示外部图片';
+    imageButton.title = '仅为本封邮件加载图片，图片服务商将看到你的出口 IP';
+    imageButton.hidden = true;
 
-    return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}body{margin:0;padding:22px;color:#243430;background:#fff;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}a{color:#236552;text-decoration:underline}pre{white-space:pre-wrap}table{max-width:100%;border-collapse:collapse}</style></head><body>${safeBody}</body></html>`;
-}
-
-function sanitizeEmailMarkup(rawHtml, inlineImages = new Map()) {
-    // template.content 在离屏惰性文档片段中解析，清洗前不会请求邮件里的外部子资源。
-    const template = document.createElement('template');
-    template.innerHTML = String(rawHtml);
-    const blocked = 'script,form,input,button,textarea,select,option,iframe,frame,frameset,object,embed,applet,base,meta,link,video,audio,source,track';
-    template.content.querySelectorAll(blocked).forEach((node) => node.remove());
-
-    template.content.querySelectorAll('img').forEach((image) => {
-        const source = image.getAttribute('src') || '';
-        if (/^cid:/i.test(source)) {
-            const data = inlineImages.get(source.slice(4));
-            if (data) image.setAttribute('src', data); else image.removeAttribute('src');
-        }
+    function refresh() {
+        if (!messageFrame || !host.isConnected) return;
+        const preview = buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages);
+        imageButton.hidden = allowExternalImages || !preview.hasExternalImages;
+        // 每次在新的子框里显示正文，避免图片授权或 CID 更新占用浏览器后退记录。
+        const nextFrame = messageFrame.cloneNode(false);
+        nextFrame.srcdoc = preview.html;
+        messageFrame.replaceWith(nextFrame);
+        messageFrame = nextFrame;
+    }
+    imageButton.addEventListener('click', () => {
+        allowExternalImages = true;
+        refresh();
+        host.focus();
     });
-    template.content.querySelectorAll('*').forEach((element) => {
-        Array.from(element.attributes).forEach((attribute) => {
-            const name = attribute.name.toLocaleLowerCase();
-            const value = attribute.value.trim();
-            const isEvent = name.startsWith('on');
-            const isNavigation = ['href', 'xlink:href', 'action', 'formaction', 'target', 'download', 'poster', 'srcset'].includes(name);
-            const isRemoteImage = name === 'src' && element.tagName === 'IMG' && !/^(?:data:|cid:)/i.test(value);
-            const isOtherSource = name === 'src' && element.tagName !== 'IMG';
+    // 可信的空壳与邮箱同源，正文 iframe 则使用不透明源，两层均禁止脚本。
+    host.addEventListener('load', () => {
+        messageFrame = host.contentDocument?.querySelector('iframe#message');
+        refresh();
+    }, { once: true });
+    host.src = '/email-preview';
+    container.append(imageButton, host);
+    return (images) => {
+        inlineImages = images;
+        refresh();
+    };
+}
 
-            if (isEvent || isNavigation || isRemoteImage || isOtherSource) {
-                element.removeAttribute(attribute.name);
+function absoluteWebUrl(value) {
+    try {
+        const url = new URL(value);
+        return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url : null;
+    } catch (error) {
+        if (error instanceof TypeError) return null;
+        throw error;
+    }
+}
+
+function buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages) {
+    // template 的 ownerDocument 没有浏览上下文，解析时保留 head/body 样式且不会预加载资源。
+    const inert = document.createElement('template').content.ownerDocument;
+    const html = inert.createElement('html');
+    html.innerHTML = String(rawHtml);
+    let hasExternalImages = false;
+    const blocked = 'script,form,input,button,textarea,select,option,iframe,frame,frameset,object,embed,applet,base,meta,link,video,audio,source,track,template,noscript,svg,math,plaintext,xmp';
+    html.querySelectorAll(blocked).forEach((node) => node.remove());
+    html.querySelectorAll('*').forEach((element) => {
+        const link = element.localName === 'a' && absoluteWebUrl(element.getAttribute('href'));
+        const source = element.localName === 'img' && (element.getAttribute('src') || '').trim();
+        for (const { name } of Array.from(element.attributes)) {
+            if (/^on/i.test(name) || ['href', 'xlink:href', 'src', 'srcset', 'srcdoc', 'action', 'formaction', 'target', 'download', 'poster', 'ping', 'attributionsrc', 'background', 'rel', 'is'].includes(name)) {
+                element.removeAttribute(name);
             }
-        });
-
-        if (element.hasAttribute('style')) {
-            const style = element.getAttribute('style')
-                .replace(/url\s*\([^)]*\)/gi, 'none')
-                .replace(/@import[^;]+;?/gi, '');
-            element.setAttribute('style', style);
+        }
+        if (link) {
+            element.setAttribute('href', link.href);
+            element.setAttribute('target', '_blank');
+            element.setAttribute('rel', 'noopener noreferrer');
+            element.setAttribute('referrerpolicy', 'no-referrer');
+        }
+        if (source) {
+            const remote = absoluteWebUrl(source);
+            if (remote?.protocol === 'https:') {
+                hasExternalImages = true;
+                if (allowExternalImages) {
+                    element.setAttribute('referrerpolicy', 'no-referrer');
+                    element.setAttribute('src', remote.href);
+                }
+            } else if (/^cid:/i.test(source)) {
+                const data = inlineImages.get(source.slice(4));
+                if (data) element.setAttribute('src', data);
+            } else if (/^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(source)) {
+                element.setAttribute('src', source);
+            }
         }
     });
-
-    return template.innerHTML;
+    const csp = [
+        "default-src 'none'", "script-src 'none'", "connect-src 'none'",
+        allowExternalImages ? 'img-src data: https:' : 'img-src data:',
+        "style-src 'unsafe-inline'", "frame-src 'none'", "form-action 'none'", "base-uri 'none'"
+    ].join('; ');
+    const head = html.querySelector('head') || html.insertBefore(inert.createElement('head'), html.firstChild);
+    head.insertAdjacentHTML('afterbegin', '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + csp + '"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}body{margin:0;padding:22px;color:#243430;background:#fff;font:16px/1.75 sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}pre{white-space:pre-wrap}table{max-width:100%}</style>');
+    return { html: '<!doctype html>' + html.outerHTML, hasExternalImages };
 }
 
 function returnFromDetail() {

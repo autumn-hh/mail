@@ -647,8 +647,9 @@ def exercise_core(page, base, fixtures, add_message, screenshots):
     ).click()
     page.locator("#detail-view").wait_for(state="visible")
     settle(page)
-    frame = page.locator("#detail-body iframe")
-    assert frame.get_attribute("sandbox") == ""
+    frame = page.frame_locator("#detail-body iframe").locator("#message")
+    sandbox = set(frame.get_attribute("sandbox").split())
+    assert sandbox == {"allow-popups", "allow-popups-to-escape-sandbox"}
     assert not page.evaluate("Boolean(window.__mailAttack)")
     checks.append("HTML 沙箱与恶意资源隔离")
     page.keyboard.press("Escape")

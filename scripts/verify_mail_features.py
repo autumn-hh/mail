@@ -73,7 +73,7 @@ def run():
                 page.locator(f'.email-row[data-email-id="{mail_id}"] .email-open').click()
                 page.wait_for_function("() => !document.getElementById('download-raw').disabled")
                 assert page.locator("#detail-attachments button").count() == 3
-                frame = page.frame_locator("#detail-body iframe")
+                frame = page.frame_locator("#detail-body iframe").frame_locator("#message")
                 frame.locator('img[src^="data:image/png"]').wait_for()
                 assert frame.locator("img").evaluate("image => image.complete && image.naturalWidth > 0")
                 assert not page.evaluate("Boolean(window.attack)")

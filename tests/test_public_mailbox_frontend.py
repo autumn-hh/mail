@@ -76,7 +76,9 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
 
     def test_mail_html_is_isolated_without_remote_loading(self):
         script = read('src/frontend/static/scripts/mailbox_manager.js')
-        self.assertIn("iframe.setAttribute('sandbox', '')", script)
+        self.assertIn("host.src = '/email-preview'", script)
+        self.assertIn("host.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox')", script)
+        self.assertIn('let allowExternalImages = false', script)
         self.assertIn("default-src 'none'", script)
         self.assertIn("connect-src 'none'", script)
         self.assertIn("form-action 'none'", script)

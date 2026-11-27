@@ -139,6 +139,30 @@ func TestPageRoutes(t *testing.T) {
 	}
 }
 
+func TestEmailPreviewDocument(t *testing.T) {
+	handler := pageNewServer(t, pageFrontend())
+	response := pageRequest(handler, http.MethodGet, "/email-preview?ignored=private-marker", nil)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected preview response: %d %v", response.Code, response.Header())
+	}
+	for name, value := range map[string]string{
+		"Content-Security-Policy": "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: https:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+		"Cache-Control":           "no-store", "Referrer-Policy": "no-referrer", "X-DNS-Prefetch-Control": "off",
+	} {
+		if got := response.Header().Get(name); got != value {
+			t.Errorf("%s = %q, want %q", name, got, value)
+		}
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "<script") || !strings.Contains(body, `id="message"`) || !strings.Contains(body, `sandbox="allow-popups allow-popups-to-escape-sandbox"`) || strings.Contains(body, "private-marker") {
+		t.Error("unexpected isolated preview document")
+	}
+	head := pageRequest(handler, http.MethodHead, "/email-preview", nil)
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Content-Length") != strconv.Itoa(len(body)) {
+		t.Errorf("unexpected preview HEAD: %d %v", head.Code, head.Header())
+	}
+}
+
 func TestPageCredentialValidation(t *testing.T) {
 	handler := pageNewServer(t, pageFrontend())
 	for _, address := range []string{"a@b", "a----b@example.test", "邮箱@例子.测试", `a\b@c`, "a\u200bb@c", "a\ufeffb@c", "a\x00b@c"} {

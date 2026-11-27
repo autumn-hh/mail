@@ -33,6 +33,7 @@ func (s *Server) registerPages() {
 	s.mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 	})
+	s.mux.HandleFunc("GET /email-preview", serveEmailPreview)
 	s.mux.HandleFunc("GET /web/{credential...}", func(w http.ResponseWriter, r *http.Request) {
 		credential := r.PathValue("credential")
 		separator := strings.LastIndex(credential, "----")
@@ -44,6 +45,24 @@ func (s *Server) registerPages() {
 	})
 	assets := &pageAssets{frontend: s.frontend, files: make(map[string]*pageAsset)}
 	s.mux.Handle("GET /static/{path...}", assets)
+}
+
+// 独立响应让邮件正文使用自己的样式策略，无需放宽带凭据的 /web 页面。
+func serveEmailPreview(w http.ResponseWriter, r *http.Request) {
+	const document = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>邮件预览</title>
+<style>html,body,iframe{display:block;width:100%;height:100%;border:0;margin:0}</style></head>
+<body><iframe id="message" title="邮件正文" referrerpolicy="no-referrer" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe></body></html>`
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Length", strconv.Itoa(len(document)))
+	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: https:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-DNS-Prefetch-Control", "off")
+	if r.Method != http.MethodHead {
+		_, _ = io.WriteString(w, document)
+	}
 }
 
 func (s *Server) pageTemplate(w http.ResponseWriter, r *http.Request, name string) {

@@ -66,7 +66,7 @@ function attachmentButton(path, name, size) {
     return button;
 }
 
-async function loadMailContent(email) {
+async function loadMailContent(email, updateInlineImages) {
     mailFeatures.content = null;
     document.getElementById('detail-auth').replaceChildren();
     document.getElementById('detail-attachments').replaceChildren();
@@ -106,7 +106,7 @@ async function loadMailContent(email) {
         const blob = await fetchMailBlob(`/api/emails/${encodeURIComponent(email.id)}/attachments/${encodeURIComponent(attachment.id)}`);
         images.set(attachment.content_id, await blobDataURL(blob));
     }
-    if (state.currentEmailId === String(email.id) && images.size) renderMessageBody({ ...email, inlineImages: images });
+    if (state.currentEmailId === String(email.id) && images.size) updateInlineImages?.(images);
 }
 
 function splitRecipients(value) { return value.split(/[,;\n]+/).map((part) => part.trim()).filter(Boolean); }
@@ -211,7 +211,7 @@ async function loadSentDetail() {
     const note = document.createElement('p'); note.className = 'view-subtitle'; note.textContent = '服务器接受不代表最终送达；退信为收到的报告，无法证明发件方身份。'; content.appendChild(note);
     const body = document.createElement('div'); body.className = 'message-body';
     if (sent.details.html) {
-        const frame = document.createElement('iframe'); frame.className = 'message-frame'; frame.title = '发件正文'; frame.setAttribute('sandbox', ''); frame.setAttribute('referrerpolicy', 'no-referrer'); frame.srcdoc = buildIsolatedHtml(sent.details.html); body.appendChild(frame);
+        appendHtmlPreview(body, sent.details.html, '发件正文');
     } else { const pre = document.createElement('pre'); pre.className = 'message-text'; pre.textContent = sent.details.text || '正文为空。'; body.appendChild(pre); }
     content.appendChild(body);
     const actions = document.createElement('div'); actions.className = 'heading-actions';
