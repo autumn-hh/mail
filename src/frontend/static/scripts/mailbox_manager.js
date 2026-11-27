@@ -793,37 +793,23 @@ function appendHtmlPreview(container, rawHtml, title, inlineImages = new Map()) 
     host.title = title;
     host.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
     host.referrerPolicy = 'no-referrer';
-    let allowExternalImages = false;
     let messageFrame;
-    const imageButton = document.createElement('button');
-    imageButton.type = 'button';
-    imageButton.className = 'button';
-    imageButton.textContent = '显示外部图片';
-    imageButton.title = '仅为本封邮件加载图片，图片服务商将看到你的出口 IP';
-    imageButton.hidden = true;
 
     function refresh() {
         if (!messageFrame || !host.isConnected) return;
-        const preview = buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages);
-        imageButton.hidden = allowExternalImages || !preview.hasExternalImages;
-        // 每次在新的子框里显示正文，避免图片授权或 CID 更新占用浏览器后退记录。
+        // 每次在新的子框里显示正文，避免 CID 更新占用浏览器后退记录。
         const nextFrame = messageFrame.cloneNode(false);
-        nextFrame.srcdoc = preview.html;
+        nextFrame.srcdoc = buildIsolatedHtml(rawHtml, inlineImages);
         messageFrame.replaceWith(nextFrame);
         messageFrame = nextFrame;
     }
-    imageButton.addEventListener('click', () => {
-        allowExternalImages = true;
-        refresh();
-        host.focus();
-    });
     // 可信的空壳与邮箱同源，正文 iframe 则使用不透明源，两层均禁止脚本。
     host.addEventListener('load', () => {
         messageFrame = host.contentDocument?.querySelector('iframe#message');
         refresh();
     }, { once: true });
     host.src = '/email-preview';
-    container.append(imageButton, host);
+    container.appendChild(host);
     return (images) => {
         inlineImages = images;
         refresh();
@@ -840,12 +826,11 @@ function absoluteWebUrl(value) {
     }
 }
 
-function buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages) {
+function buildIsolatedHtml(rawHtml, inlineImages) {
     // template 的 ownerDocument 没有浏览上下文，解析时保留 head/body 样式且不会预加载资源。
     const inert = document.createElement('template').content.ownerDocument;
     const html = inert.createElement('html');
     html.innerHTML = String(rawHtml);
-    let hasExternalImages = false;
     const blocked = 'script,form,input,button,textarea,select,option,iframe,frame,frameset,object,embed,applet,base,meta,link,video,audio,source,track,template,noscript,svg,math,plaintext,xmp';
     html.querySelectorAll(blocked).forEach((node) => node.remove());
     html.querySelectorAll('*').forEach((element) => {
@@ -865,11 +850,8 @@ function buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages) {
         if (source) {
             const remote = absoluteWebUrl(source);
             if (remote?.protocol === 'https:') {
-                hasExternalImages = true;
-                if (allowExternalImages) {
-                    element.setAttribute('referrerpolicy', 'no-referrer');
-                    element.setAttribute('src', remote.href);
-                }
+                element.setAttribute('referrerpolicy', 'no-referrer');
+                element.setAttribute('src', remote.href);
             } else if (/^cid:/i.test(source)) {
                 const data = inlineImages.get(source.slice(4));
                 if (data) element.setAttribute('src', data);
@@ -880,12 +862,12 @@ function buildIsolatedHtml(rawHtml, inlineImages, allowExternalImages) {
     });
     const csp = [
         "default-src 'none'", "script-src 'none'", "connect-src 'none'",
-        allowExternalImages ? 'img-src data: https:' : 'img-src data:',
+        'img-src data: https:',
         "style-src 'unsafe-inline'", "frame-src 'none'", "form-action 'none'", "base-uri 'none'"
     ].join('; ');
     const head = html.querySelector('head') || html.insertBefore(inert.createElement('head'), html.firstChild);
     head.insertAdjacentHTML('afterbegin', '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + csp + '"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}body{margin:0;padding:22px;color:#243430;background:#fff;font:16px/1.75 sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}pre{white-space:pre-wrap}table{max-width:100%}</style>');
-    return { html: '<!doctype html>' + html.outerHTML, hasExternalImages };
+    return '<!doctype html>' + html.outerHTML;
 }
 
 function returnFromDetail() {

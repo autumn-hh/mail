@@ -1,4 +1,4 @@
-"""验证真实邮箱预览的样式、用户点击和逐封外图授权，仅访问回环地址。"""
+"""验证真实邮箱预览的样式、点击链接和自动加载 HTTPS 图片，仅访问回环地址。"""
 
 import base64
 
@@ -44,14 +44,13 @@ def run():
         page.goto(base + mailbox_path(fixtures["boxes"]["studio"]))
         frame = page.frame_locator("#detail-body iframe").frame_locator("#message")
         action = frame.get_by_role("link", name="Sign in")
-        show_images = page.get_by_role("button", name="显示外部图片")
 
         page.locator(f'.email-row[data-email-id="{first}"] .email-open').click()
         expect(action).to_have_css("color", "rgb(253, 254, 255)")
         expect(action).to_have_css("background-color", "rgb(18, 52, 86)")
         assert frame.get_by_text("Unsupported link").get_attribute("href") is None
-        expect(show_images).to_be_visible()
-        assert not external, external
+        expect(frame.locator("img")).to_have_js_property("naturalWidth", 1)
+        assert external == [(LOGO, None)], external
 
         with context.expect_page() as opened:
             action.click()
@@ -59,21 +58,16 @@ def run():
         expect(popup).to_have_title("Test destination")
         assert popup.evaluate("window.opener === null && document.referrer === ''")
         popup.close()
-        assert external == [(SIGN_IN, None)], external
-
-        show_images.click()
-        expect(frame.locator("img")).to_have_js_property("naturalWidth", 1)
-        assert external == [(SIGN_IN, None), (LOGO, None)], external
+        assert external == [(LOGO, None), (SIGN_IN, None)], external
 
         page.locator("#detail-back").click()
         expect(page.locator("#inbox-view")).to_be_visible()
         page.locator(f'.email-row[data-email-id="{second}"] .email-open').click()
         expect(action).to_be_visible()
-        expect(show_images).to_be_visible()
-        expect(frame.locator("img")).to_have_js_property("naturalWidth", 0)
-        assert external == [(SIGN_IN, None), (LOGO, None)], external
+        expect(frame.locator("img")).to_have_js_property("naturalWidth", 1)
+        assert external == [(LOGO, None), (SIGN_IN, None), (LOGO, None)], external
         browser.close()
-    print("PASS: message CSS, click-only safe links, no referrer/opener, per-message image consent")
+    print("PASS: message CSS, automatic HTTPS images, click-only links, no referrer/opener")
 
 
 if __name__ == "__main__":

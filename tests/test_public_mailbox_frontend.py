@@ -74,11 +74,11 @@ class PublicMailboxFrontendContractTest(unittest.TestCase):
         self.assertNotIn('?token=', script)
         self.assertNotIn('/mailbox?', script)
 
-    def test_mail_html_is_isolated_without_remote_loading(self):
+    def test_mail_html_is_isolated_and_allows_https_images(self):
         script = read('src/frontend/static/scripts/mailbox_manager.js')
         self.assertIn("host.src = '/email-preview'", script)
         self.assertIn("host.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox')", script)
-        self.assertIn('let allowExternalImages = false', script)
+        self.assertIn('img-src data: https:', script)
         self.assertIn("default-src 'none'", script)
         self.assertIn("connect-src 'none'", script)
         self.assertIn("form-action 'none'", script)

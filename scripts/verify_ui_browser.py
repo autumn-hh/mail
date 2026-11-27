@@ -313,7 +313,7 @@ def isolated_site(port=0, mail_features=False):
         unsafe_id = add_message(
             "隔离测试 · 不可信 HTML",
             "<script>parent.__mailAttack=true</scri"
-            'pt><img src="https://maildrop-qa.inval'
+            'pt><img src="http://maildrop-qa.inval'
             'id/pixel"><iframe src="https://maildro'
             'p-qa.invalid/frame"></iframe><form act'
             'ion="https://maildrop-qa.invalid/post"'
